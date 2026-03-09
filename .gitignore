@@ -1,0 +1,9 @@
+node_modules/
+dist/
+dist-electron/
+release/
+ios/App/Pods/
+ios/App/App/public/
+.claude/
+.DS_Store
+*.dmg

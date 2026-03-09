@@ -1,0 +1,209 @@
+/* App layout */
+
+.app-root {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg-primary);
+}
+
+.app-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.app-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  margin: 0 0 0 0;
+  box-shadow: var(--shadow-sm);
+}
+
+/* Right sidebar */
+.app-right-sidebar {
+  width: 380px;
+  min-width: 280px;
+  max-width: 500px;
+  border-left: 1px solid var(--border-subtle);
+  background: var(--bg-secondary);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.right-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.close-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background var(--transition);
+  line-height: 1;
+}
+.close-btn:hover {
+  background: var(--bg-active);
+  color: var(--text-primary);
+}
+
+/* Sidebar backdrop (mobile drawer) — hidden on desktop */
+.sidebar-backdrop {
+  display: none;
+}
+
+/* Loading */
+.app-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  gap: 16px;
+  color: var(--text-secondary);
+}
+
+.loading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 2px solid var(--border-normal);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Empty state */
+.app-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 12px;
+  color: var(--text-secondary);
+}
+
+.empty-icon {
+  font-size: 48px;
+  opacity: 0.4;
+}
+
+.app-empty h2 {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+  opacity: 0.6;
+}
+
+.app-empty p {
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.app-empty kbd {
+  display: inline-block;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-normal);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+
+/* ─── Update Progress Overlay ─────────────────────────────── */
+.update-progress-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.update-progress-box {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-normal);
+  border-radius: var(--radius-xl);
+  padding: 28px 32px;
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: var(--shadow-lg);
+}
+
+.update-progress-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: center;
+}
+
+.update-progress-bar-wrap {
+  height: 6px;
+  background: var(--bg-tertiary);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.update-progress-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.update-progress-pct {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.update-progress-error {
+  font-size: 13px;
+  color: var(--red, #ef4444);
+  text-align: center;
+  line-height: 1.5;
+}
+
+.update-progress-dismiss {
+  margin: 0 auto;
+  padding: 6px 20px;
+  background: var(--bg-hover);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--transition);
+}
+.update-progress-dismiss:hover {
+  background: var(--bg-active);
+}

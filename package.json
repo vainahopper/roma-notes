@@ -1,0 +1,95 @@
+{
+  "name": "roma-notes",
+  "version": "1.7.93",
+  "description": "A Roam Research-inspired note-taking app for macOS",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && NODE_ENV=development electron .\"",
+    "start": "npm run build && electron .",
+    "build": "vite build && node build-electron.js",
+    "dist": "npm run build && electron-builder --mac dmg --arm64 && node post-dist.js",
+    "pack": "npm run build && electron-builder --dir",
+    "build:ios": "npm run build && npx cap sync ios",
+    "open:ios": "npx cap open ios",
+    "deploy:ios": "npm run build && bash scripts/deploy-ios-update.sh",
+    "deploy:github": "bash scripts/deploy-github-release.sh",
+    "deploy:all": "npm run dist && bash scripts/deploy-ios-update.sh && bash scripts/deploy-github-release.sh"
+  },
+  "build": {
+    "appId": "com.codevainas.roma-notes",
+    "productName": "Roma Notes",
+    "asar": true,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "dist-electron/touchid-helper",
+        "to": "touchid-helper"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "dmg": {
+      "title": "Roma Notes",
+      "artifactName": "Roma Notes.dmg",
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    }
+  },
+  "keywords": [
+    "notes",
+    "roam",
+    "knowledge-base"
+  ],
+  "author": "Carlos Montesinos",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/crypto-js": "^4.2.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.4",
+    "concurrently": "^9.2.1",
+    "electron": "^40.4.1",
+    "electron-builder": "^26.7.0",
+    "vite": "^7.3.1",
+    "wait-on": "^8.0.5"
+  },
+  "dependencies": {
+    "@aparajita/capacitor-biometric-auth": "^10.0.0",
+    "@aparajita/capacitor-secure-storage": "^8.0.0",
+    "@capacitor/browser": "^8.0.1",
+    "@capacitor/cli": "^8.1.0",
+    "@capacitor/core": "^8.1.0",
+    "@capacitor/ios": "^8.1.0",
+    "adm-zip": "^0.5.16",
+    "crypto-js": "^4.2.0",
+    "date-fns": "^4.1.0",
+    "fuse.js": "^7.1.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
+  }
+}

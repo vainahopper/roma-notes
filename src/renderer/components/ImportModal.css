@@ -1,0 +1,226 @@
+.import-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 900;
+}
+
+.import-modal {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-normal);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+  padding: 32px;
+  width: 480px;
+  max-width: 90vw;
+}
+
+.import-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.import-header h2 {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.import-description {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin-bottom: 24px;
+}
+
+.import-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.import-option {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 20px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--transition), border-color var(--transition);
+}
+
+.import-option:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+}
+
+.option-icon {
+  font-size: 28px;
+  flex-shrink: 0;
+}
+
+.option-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.option-text strong {
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.option-text span {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.import-note {
+  font-size: 12px;
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  line-height: 1.5;
+}
+
+/* Importing state */
+.importing-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 0;
+}
+
+.importing-state p {
+  font-size: 15px;
+  color: var(--text-primary);
+}
+
+.import-sub {
+  font-size: 12px !important;
+  color: var(--text-muted) !important;
+}
+
+.import-progress-bar {
+  width: 100%;
+  height: 4px;
+  background: var(--bg-tertiary);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.import-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 300ms ease;
+}
+
+/* Done state */
+.import-done {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 0;
+  text-align: center;
+}
+
+.done-icon {
+  width: 56px;
+  height: 56px;
+  background: rgba(16, 185, 129, 0.15);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  color: var(--green);
+}
+
+.import-done h3 {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.import-done p {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.done-btn {
+  padding: 10px 32px;
+  background: var(--accent);
+  color: white;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--transition);
+  margin-top: 8px;
+}
+.done-btn:hover { background: var(--accent-hover); }
+
+/* Error state */
+.import-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 20px 0;
+  text-align: center;
+}
+
+.error-icon { font-size: 36px; }
+
+.import-error h3 {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--red);
+}
+
+.import-error p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  max-width: 320px;
+}
+
+.import-error-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.modal-btn {
+  padding: 8px 18px;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--transition);
+}
+.modal-btn.secondary {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+.modal-btn.secondary:hover { background: var(--bg-active); }
+.modal-btn.primary {
+  background: var(--accent);
+  color: white;
+}
+.modal-btn.primary:hover { background: var(--accent-hover); }

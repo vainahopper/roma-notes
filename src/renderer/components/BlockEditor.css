@@ -1,0 +1,12 @@
+.block-editor {
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+/* Disable browser text selection while Roam-style block-select mode is active */
+.block-editor.block-select-active,
+.block-editor.block-select-active * {
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}

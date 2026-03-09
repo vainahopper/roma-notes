@@ -1,0 +1,140 @@
+.block-content {
+  word-break: break-word;
+}
+
+.block-content.done {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+
+/* Wikilinks */
+.wikilink-group {
+  display: inline;
+}
+
+.wikilink {
+  display: inline;
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 0 1px;
+  text-decoration: none;
+  transition: background var(--transition), color var(--transition);
+}
+
+.wikilink.exists,
+.wikilink.new {
+  color: var(--link);
+  background: rgba(129, 140, 248, 0.08);
+}
+
+.wikilink.exists:hover,
+.wikilink.new:hover {
+  color: var(--link-hover);
+  background: rgba(129, 140, 248, 0.16);
+}
+
+.wikilink-brackets {
+  opacity: 0.5;
+  font-size: 0.85em;
+}
+
+/* Tags */
+.tag {
+  display: inline;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.92em;
+  opacity: 0.85;
+  transition: opacity var(--transition);
+  border-radius: 3px;
+  padding: 0 2px;
+}
+
+.tag:hover {
+  opacity: 1;
+  background: var(--accent-dim);
+}
+
+/* External links */
+.external-link {
+  color: var(--blue);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.external-link:hover { color: #60a5fa; }
+
+/* Block ref */
+.block-ref {
+  display: inline;
+  border-radius: 3px;
+  padding: 0 2px;
+  transition: background var(--transition), color var(--transition);
+}
+
+.block-ref-found {
+  color: var(--link);
+  background: rgba(129, 140, 248, 0.08);
+  cursor: pointer;
+}
+
+.block-ref-found:hover {
+  color: var(--link-hover);
+  background: rgba(129, 140, 248, 0.16);
+}
+
+.block-ref-missing {
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  cursor: default;
+  font-style: italic;
+}
+
+.block-ref-brackets {
+  opacity: 0.5;
+  font-size: 0.85em;
+}
+
+.block-ref-content {
+  /* content shown inline */
+}
+
+/* Inline todo */
+.inline-todo {
+  display: inline-block;
+  margin-right: 4px;
+  font-size: 0.85em;
+  opacity: 0.7;
+}
+.inline-todo.done { color: var(--todo-done); }
+
+/* Attribute (Key:: value) */
+.attribute {
+  display: block;
+}
+.attr-key {
+  color: var(--text-muted);
+  font-size: 0.88em;
+  font-weight: 500;
+}
+.attr-value {
+  color: var(--text-primary);
+}
+
+/* Inline headings (### from Roam) */
+.inline-heading {
+  display: block;
+  font-weight: 700;
+  margin: 4px 0 2px;
+}
+.h1 { font-size: 1.6em; }
+.h2 { font-size: 1.35em; }
+.h3 { font-size: 1.15em; color: var(--text-secondary); }
+.h4, .h5, .h6 { font-size: 1em; color: var(--text-muted); }
+
+/* Encrypted inline */
+.encrypted-inline {
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 0.9em;
+}

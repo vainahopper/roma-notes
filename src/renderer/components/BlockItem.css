@@ -1,0 +1,375 @@
+.block-item {
+  position: relative;
+}
+
+/* ─── Roam-style block selection (drag past bullet) ──────────── */
+.block-item.block-selected > .block-row {
+  background: var(--accent-dim);
+  border-radius: 3px;
+  outline: 1px solid transparent; /* prevent layout shift */
+}
+
+@keyframes block-highlight-fade {
+  0%   { background: var(--accent-dim); }
+  100% { background: transparent; }
+}
+.block-item.block-highlight {
+  animation: block-highlight-fade 1.5s ease forwards;
+  border-radius: var(--radius-sm);
+}
+
+.block-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  padding: 1px 0;
+  min-height: 26px;
+}
+
+.block-children {
+  padding-left: 6px;
+  margin-left: 24px;   /* aligns left edge with bullet center (toggle 14px + half bullet-area 11px = 25px ≈ 24px) */
+}
+
+/* Vertical guide line centered on the bullet dot — Roam style.
+   ::before on .block-item so line starts at the bullet's vertical position,
+   not after the block text (which was the border-left bug). */
+.block-item:has(> .block-children)::before {
+  content: '';
+  position: absolute;
+  left: 24px;     /* center: 24 + 0.75 = 24.75px ≈ bullet center (toggle 14 + half bullet-area 11 = 25px) */
+  top: 26px;      /* Roam-style gap: bullet dot bottom ≈ 15.5px + ~10px gap = 26px */
+  bottom: 0;
+  width: 1.5px;
+  background: var(--border-subtle);
+  pointer-events: none;
+}
+
+/* ─── Collapse toggle ──────────────────────────────────────── */
+
+.block-toggle-area {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  width: 14px;
+  height: 24px;
+}
+
+.block-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--text-muted);
+  opacity: 0;
+  border-radius: 3px;
+  transition: opacity var(--transition), background var(--transition), color var(--transition);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.block-row:hover .block-toggle,
+.block-toggle:focus {
+  opacity: 1;
+}
+
+.block-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+/* ─── Bullet area ─────────────────────────────────────────── */
+
+.block-bullet-area {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 24px;
+  justify-content: center;
+  position: relative;
+  gap: 2px;
+}
+
+/* Medium filled circle bullet */
+.block-bullet {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 24px;
+  cursor: pointer;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.block-bullet-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  transition: background var(--transition), transform var(--transition);
+  display: block;
+  flex-shrink: 0;
+}
+
+.block-bullet:hover .block-bullet-dot {
+  background: var(--accent);
+  transform: scale(1.2);
+}
+
+
+/* Bullet tooltip with block timestamps */
+.block-bullet-tooltip {
+  display: none;
+  flex-direction: column;
+  position: absolute;
+  left: 28px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-normal);
+  border-radius: var(--radius-md);
+  padding: 6px 10px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  white-space: nowrap;
+  z-index: 200;
+  box-shadow: var(--shadow-lg);
+  pointer-events: none;
+}
+
+.block-bullet:hover .block-bullet-tooltip {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Todo checkbox — flex sibling in block-row, after the bullet area */
+.block-checkbox {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 24px;
+  margin-right: 4px;
+  flex-shrink: 0;
+}
+.block-checkbox:focus { outline: none; }
+
+/* ─── Content area ────────────────────────────────────────── */
+
+.block-content-area {
+  flex: 1;
+  min-width: 0;
+  cursor: text;
+}
+
+.block-textarea {
+  display: block;
+  width: 100%;
+  resize: none;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: 0;
+  font-family: var(--font-sans);
+  overflow: hidden;
+  min-height: 24px;
+  caret-color: var(--accent);
+  word-break: break-word;
+}
+
+.block-textarea:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.block-textarea.done-text {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+.block-rendered {
+  cursor: text;
+  min-height: 24px;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  word-break: break-word;
+  padding-top: 0;
+}
+
+.block-rendered.done-text {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+/* Collapsed bullet ring — shown on the bullet dot when block is collapsed */
+.block-row.collapsed .block-bullet-dot {
+  box-shadow: 0 0 0 2px var(--bg-primary), 0 0 0 3.5px var(--text-muted);
+  background: var(--text-muted);
+  transition: box-shadow var(--transition), background var(--transition), transform var(--transition);
+}
+.block-row.collapsed .block-bullet:hover .block-bullet-dot {
+  box-shadow: 0 0 0 2px var(--bg-primary), 0 0 0 3.5px var(--accent);
+  background: var(--accent);
+}
+
+/* ─── Encrypted block ─────────────────────────────────────── */
+
+.encrypted-block {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 3px 10px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.encrypted-icon { font-size: 14px; }
+.encrypted-label { opacity: 0.7; }
+
+.decrypt-btn {
+  font-size: 12px;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--accent-dim);
+}
+.decrypt-btn:hover { background: rgba(99, 102, 241, 0.3); }
+.decrypt-btn:focus { outline: none; }
+
+.decrypt-btn-link {
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  background: transparent;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.decrypt-btn-link:hover { color: var(--text-secondary); }
+.decrypt-btn-link:focus { outline: none; }
+
+.decrypt-input-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.decrypt-input {
+  font-size: 13px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-normal);
+  border-radius: 4px;
+  padding: 3px 8px;
+  color: var(--text-primary);
+  outline: none;
+}
+.decrypt-input.error { border-color: var(--red); }
+.decrypt-input:focus { border-color: var(--accent); outline: none; }
+
+/* Wraps the optional hint + input row in a column so hint is above input */
+.decrypt-password-wrap {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.decrypt-biometric-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.decrypted-content {
+  background: rgba(99, 102, 241, 0.08);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-style: italic;
+  opacity: 0.9;
+}
+
+/* ─── Modal ───────────────────────────────────────────────── */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-box {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-normal);
+  border-radius: var(--radius-xl);
+  padding: 28px;
+  width: 360px;
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.modal-box h3 {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.modal-box p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.modal-input {
+  width: 100%;
+  padding: 10px 14px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-normal);
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  color: var(--text-primary);
+  outline: none;
+}
+.modal-input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.modal-btn {
+  padding: 8px 18px;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--transition);
+}
+.modal-btn.secondary { background: var(--bg-hover); color: var(--text-secondary); }
+.modal-btn.secondary:hover { background: var(--bg-active); }
+.modal-btn.primary { background: var(--accent); color: white; }
+.modal-btn.primary:hover { background: var(--accent-hover); }
+.modal-btn.primary:disabled { opacity: 0.4; cursor: not-allowed; }
+.modal-btn:focus { outline: none; }

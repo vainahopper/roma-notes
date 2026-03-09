@@ -1,0 +1,416 @@
+/* ─── Roma Notes – Mobile Adaptations ─────────────────────────────────── */
+/* Applied via @media (max-width: 768px) for phones and small tablets     */
+
+/* ─── Safe areas (notch, home indicator) ──────────────────────────────── */
+
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
+@media (max-width: 768px) {
+
+  /* ─── Base adjustments ─────────────────────────────────────────────── */
+
+  html, body {
+    /* Prevent iOS overscroll bounce revealing white background */
+    overscroll-behavior: none;
+    -webkit-overflow-scrolling: touch;
+    /* Ensure minimum font size for readability */
+    font-size: 15px;
+    /* Prevent iOS from scrolling the root document when keyboard appears/dismisses.
+       overflow:hidden stops the gap-at-top bug on the document level.
+       The real fix is contentInsetAdjustmentBehavior=.never in native code. */
+    overflow: hidden;
+    /* Lock horizontal scroll — only vertical scrolling allowed */
+    overflow-x: hidden;
+  }
+
+  /* Prevent iOS auto-zoom on input focus (need 16px minimum) */
+  input, textarea, select {
+    font-size: 16px !important;
+  }
+
+  /* ─── Native-feel: eliminate 300ms tap delay and tap highlight ──────── */
+
+  button, a, [role="button"],
+  .block-bullet, .block-toggle, .sidebar-item,
+  .titlebar-btn, .mobile-bottom-item {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* ─── Smooth GPU-composited scrolling ──────────────────────────────── */
+
+  .page-scroll, .daily-notes-view, .sidebar, .search-results {
+    -webkit-overflow-scrolling: touch;
+    will-change: scroll-position;
+  }
+
+  /* ─── App layout ───────────────────────────────────────────────────── */
+
+  .app-root {
+    height: 100dvh; /* dynamic viewport height — respects iOS keyboard */
+    /* Safe-top handled by the fixed titlebar; keep bottom for content */
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
+  .app-body {
+    /* Offset for fixed titlebar (height + safe-top) */
+    margin-top: calc(48px + var(--safe-top));
+    /* Offset for fixed bottom nav bar (~49px) */
+    margin-bottom: calc(49px + var(--safe-bottom));
+  }
+
+
+  /* ─── TitleBar — fixed so it stays put even when keyboard scrolls ─── */
+
+  .titlebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    /* Include safe-area so bar sits below the notch/status bar */
+    height: calc(48px + var(--safe-top));
+    padding-top: var(--safe-top);
+    padding-left: 12px;
+    padding-right: 12px;
+    -webkit-app-region: none; /* no drag on mobile */
+    z-index: 400; /* above page content, below sidebar drawer (500) */
+  }
+
+  .titlebar-drag {
+    -webkit-app-region: none;
+  }
+
+  .titlebar-left {
+    /* No traffic lights on mobile */
+    padding-left: 0;
+    gap: 4px;
+  }
+
+  .titlebar-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius-md);
+  }
+
+  .titlebar-btn.nav-btn {
+    width: 36px;
+    height: 36px;
+  }
+
+  .titlebar-right {
+    gap: 2px;
+  }
+
+  .app-name {
+    font-size: 15px;
+    font-weight: 600;
+    opacity: 1;
+  }
+
+  /* Hide version from titlebar on mobile — shown only in sidebar */
+  .titlebar-version {
+    display: none;
+  }
+
+  /* ─── Sidebar → Drawer overlay ─────────────────────────────────────── */
+
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 300px;
+    max-width: 85vw;
+    min-width: unset;
+    z-index: 500;
+    transform: translateX(0);
+    transition: transform 0.25s ease;
+    padding-top: var(--safe-top);
+    padding-bottom: var(--safe-bottom);
+    box-shadow: var(--shadow-lg);
+  }
+
+  .sidebar-action-btn {
+    padding: 10px 12px;
+    font-size: 14px;
+  }
+
+  .sidebar-section-header {
+    padding: 8px 12px;
+    font-size: 12px;
+  }
+
+  .sidebar-item {
+    padding: 8px 10px;
+    font-size: 15px;
+    min-height: 40px;
+  }
+
+  .sidebar-bottom-btn {
+    padding: 10px 12px;
+    font-size: 14px;
+  }
+
+  /* Sidebar overlay backdrop */
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 499;
+    opacity: 1;
+    transition: opacity 0.25s ease;
+  }
+
+  /* ─── Main content ─────────────────────────────────────────────────── */
+
+  .app-main {
+    border-radius: 0;
+    margin: 0;
+  }
+
+  /* Hide right sidebar on mobile */
+  .app-right-sidebar {
+    display: none;
+  }
+
+  /* ─── Block editor ─────────────────────────────────────────────────── */
+
+  .block-row {
+    min-height: 32px;
+    padding: 1px 0;
+    /* Align to top so bullet stays at first line on multi-line blocks */
+    align-items: flex-start;
+  }
+
+  .block-toggle-area {
+    width: 24px;
+    /* Fixed height matching first text line so toggle aligns to it */
+    height: 28px;
+    align-self: flex-start;
+  }
+
+  .block-toggle {
+    width: 24px;
+    height: 24px;
+    opacity: 1; /* always visible on mobile (no hover) */
+  }
+
+  .block-bullet-area {
+    width: 28px;
+    /* Fixed height matching first text line so bullet/checkbox align to it */
+    height: 28px;
+    align-self: flex-start;
+  }
+
+  .block-bullet {
+    width: 28px;
+    height: 28px;
+  }
+
+  .block-bullet-dot {
+    width: 6px;
+    height: 6px;
+  }
+
+  /* No hover tooltip on mobile */
+  .block-bullet:hover .block-bullet-tooltip {
+    display: none;
+  }
+
+  .block-checkbox {
+    width: 20px;
+    height: 28px;
+    align-self: flex-start;
+    margin-right: 4px;
+  }
+
+  .block-children {
+    padding-left: 4px;
+    margin-left: 37px;  /* bullet center: toggle(24) + half bullet-area(14) = 38px; bar center = 37+0.75 ≈ 37.75px */
+  }
+
+  /* Override ::before for mobile: toggle=24px, bullet-area=28px */
+  .block-item:has(> .block-children)::before {
+    left: 37px;   /* bar center 37.75px ≈ bullet center 38px */
+    top: 27px;    /* Roam-style gap: bullet dot bottom ≈ 18px + ~9px gap = 27px */
+  }
+
+  /* Block content / textarea */
+  .block-content-area {
+    min-height: 28px;
+    line-height: 1.65;
+    /* Ensure text aligns with bullet center */
+    padding-top: 2px;
+    padding-bottom: 2px;
+  }
+
+  .block-textarea {
+    font-size: 16px !important; /* Prevent iOS auto-zoom on focus (minimum 16px required) */
+    line-height: 1.65;
+    min-height: 28px;
+    padding-top: 2px;
+    padding-bottom: 2px;
+  }
+
+  /* Always show star/delete buttons on mobile (no hover) */
+  .sidebar-delete-btn,
+  .sidebar-star-btn {
+    opacity: 0.6;
+    width: 28px;
+    height: 28px;
+  }
+
+  /* Always show drag handles on mobile */
+  .sidebar-drag-handle {
+    opacity: 0.5;
+  }
+
+  /* Page header star/delete — always visible on mobile (no hover) */
+  .page-header .page-star-btn {
+    opacity: 1;
+  }
+  .page-header .page-delete-btn {
+    opacity: 0.6;
+  }
+  /* Remove hover-triggered opacity (tap :active handles feedback) */
+  .page-header:hover .page-star-btn,
+  .page-header:hover .page-delete-btn {
+    opacity: 1;
+  }
+
+  /* ─── Page view ────────────────────────────────────────────────────── */
+
+  .page-view {
+    padding: 0;
+  }
+
+  .page-content {
+    /* Extra bottom padding: bottom bar (49px) + keyboard toolbar (44px) + clearance */
+    padding: 16px 16px 160px;
+  }
+
+  .page-title-input {
+    font-size: 24px !important;
+    padding: 12px 16px;
+  }
+
+  /* Ensure active textarea scrolls into view above keyboard toolbar */
+  .block-textarea:focus {
+    scroll-margin-bottom: 160px;
+  }
+
+  .page-scroll {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* ─── Daily notes ──────────────────────────────────────────────────── */
+
+  .daily-notes-view {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .daily-notes-header {
+    padding: 20px 16px 0;
+  }
+
+  .daily-notes-list {
+    padding: 0 16px 160px;
+  }
+
+  .daily-date-heading {
+    font-size: 22px;
+  }
+
+  /* ─── Modals ───────────────────────────────────────────────────────── */
+
+  .search-overlay,
+  .import-overlay,
+  .calendar-overlay {
+    align-items: flex-start;
+    padding: 12px;
+    padding-top: calc(12px + var(--safe-top));
+  }
+
+  .search-modal {
+    width: 100%;
+    max-width: 100%;
+    max-height: 70vh;
+    border-radius: var(--radius-lg);
+  }
+
+  .import-modal {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .calendar-modal {
+    width: 100%;
+    max-width: 360px;
+  }
+
+  /* ─── Search modal ─────────────────────────────────────────────────── */
+
+  .search-input {
+    font-size: 16px !important; /* prevent zoom */
+    padding: 12px 14px;
+  }
+
+  .search-result {
+    padding: 10px 14px;
+    min-height: 44px;
+  }
+
+  /* ─── Autocomplete dropdowns ───────────────────────────────────────── */
+
+  .wikilink-autocomplete,
+  .blockref-autocomplete {
+    max-height: 200px;
+  }
+
+  .wikilink-autocomplete-item,
+  .blockref-autocomplete-item {
+    padding: 10px 12px;
+    min-height: 40px;
+  }
+
+  /* ─── Slash menu ───────────────────────────────────────────────────── */
+
+  .slash-menu-item {
+    padding: 10px 12px;
+    min-height: 40px;
+    font-size: 14px;
+  }
+
+  /* ─── Encrypted block view ─────────────────────────────────────────── */
+
+  .encrypted-block .encrypted-unlock-btn {
+    padding: 8px 16px;
+    min-height: 40px;
+    font-size: 14px;
+  }
+
+  .encrypted-password-input {
+    font-size: 16px !important;
+    padding: 10px 12px;
+    min-height: 44px;
+  }
+
+  /* ─── Linked references ────────────────────────────────────────────── */
+
+  .linked-refs-header {
+    padding: 10px 0;
+  }
+
+  .linked-refs-item {
+    padding: 8px 10px;
+  }
+}

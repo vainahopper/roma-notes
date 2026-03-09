@@ -1,0 +1,284 @@
+.linked-refs {
+  border-top: 1px solid var(--border-subtle);
+  margin-top: 40px;
+  padding: 20px 60px 40px;
+}
+
+.linked-refs-header-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.linked-refs-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color var(--transition);
+  padding: 4px 0;
+}
+.linked-refs-header:hover { color: var(--text-secondary); }
+
+.refs-count {
+  background: var(--bg-tertiary);
+  border-radius: 10px;
+  padding: 1px 7px;
+  font-size: 10px;
+}
+
+/* Link All button */
+.link-all-btn {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--accent);
+  background: var(--accent-dim);
+  border-radius: var(--radius-sm);
+  padding: 2px 9px;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+  white-space: nowrap;
+}
+.link-all-btn:hover {
+  background: var(--accent);
+  color: white;
+}
+
+.linked-refs-list {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ─── Backlink item card ───────────────────────────── */
+
+.backlink-item {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  position: relative;
+}
+
+/* Page title row */
+.backlink-page-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px 9px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--link);
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--transition), color var(--transition);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.backlink-page-title:hover {
+  background: var(--bg-hover);
+  color: var(--link-hover);
+}
+
+.backlink-page-bullet {
+  font-size: 12px;
+  color: var(--link);
+  flex-shrink: 0;
+}
+
+/* Expand/collapse toggle for the whole block list */
+.backlink-toggle {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+.backlink-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+.backlink-blocks {
+  padding: 6px 8px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* ─── Individual backlink block row ───────────────── */
+
+.backlink-block-row {
+  padding-left: 0;
+}
+
+.backlink-block-preview {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  cursor: default;
+  transition: background var(--transition);
+}
+.backlink-block-preview:hover {
+  background: var(--bg-hover);
+}
+
+/* Toggle area for child blocks */
+.backlink-toggle-area {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 14px;
+  height: 24px;
+}
+
+.backlink-child-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--text-muted);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+  opacity: 0;
+}
+.backlink-block-preview:hover .backlink-child-toggle {
+  opacity: 1;
+}
+.backlink-child-toggle:hover {
+  background: var(--bg-active);
+  color: var(--text-secondary);
+}
+
+/* Bullet dot — same style as main editor */
+.backlink-bullet-area {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 24px;
+  gap: 2px;
+}
+
+/* Bullet shown alongside checkbox on TODO backlink blocks */
+.backlink-todo-side-bullet {
+  width: 4px;
+  height: 4px;
+  flex-shrink: 0;
+}
+
+/* TODO bullet area: more gap between dot ↔ checkbox, space before content */
+.backlink-bullet-area.todo-bullet-area {
+  gap: 4px;
+  margin-right: 5px;
+}
+
+.backlink-bullet-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  display: block;
+  flex-shrink: 0;
+}
+
+/* Todo checkbox in backlink — compact to fit next to bullet dot */
+.backlink-checkbox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 20px;
+  flex-shrink: 0;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: opacity var(--transition);
+}
+.backlink-checkbox:hover {
+  opacity: 0.75;
+}
+
+/* Bullet navigation — pointer cursor on hover */
+.backlink-bullet-nav {
+  cursor: pointer;
+  transition: background var(--transition), transform var(--transition);
+}
+.backlink-bullet-nav:hover {
+  background: var(--accent) !important;
+  transform: scale(1.3);
+}
+
+/* Content area */
+.backlink-content {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  word-break: break-word;
+  cursor: default;
+}
+.backlink-content.backlink-content-editable {
+  cursor: text;
+}
+.backlink-content.backlink-content-editable:hover {
+  color: var(--text-primary);
+}
+.backlink-content.done-text {
+  text-decoration: line-through;
+  opacity: 0.55;
+}
+
+/* Inline edit textarea */
+.backlink-edit-textarea {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  background: var(--bg-active);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 2px 4px;
+  resize: none;
+  outline: none;
+  overflow: hidden;
+  min-height: 24px;
+}
+.backlink-edit-textarea.done-text {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+/* Children indentation */
+.backlink-children {
+  padding-left: 36px;
+  border-left: 1.5px solid var(--border-subtle);
+  margin-left: 22px;
+}
+
+.backlink-more {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 4px 0 2px 36px;
+}

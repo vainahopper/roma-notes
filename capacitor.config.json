@@ -1,0 +1,12 @@
+{
+  "appId": "com.codevainas.romanotes",
+  "appName": "Roma Notes",
+  "webDir": "dist",
+  "ios": {
+    "contentInset": "never",
+    "preferredContentMode": "mobile"
+  },
+  "server": {
+    "iosScheme": "capacitor"
+  }
+}

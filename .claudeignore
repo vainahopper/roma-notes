@@ -1,0 +1,15 @@
+# Dependencies
+node_modules/
+
+# Build outputs (generated automatically)
+dist/
+dist-electron/
+
+# Release artifacts
+release/
+
+# Assets (images, icons — not useful for code tasks)
+assets/
+
+# Lock files (large, rarely useful)
+package-lock.json
