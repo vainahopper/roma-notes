@@ -73,9 +73,10 @@ function parseContent(
   onNavigate: (id: string, title?: string) => void,
   onOpenSidebar: (id: string) => void,
   onNavigateToBlock?: (pageId: string, pageTitle: string, blockId: string) => void,
+  visitedBlockIds: Set<string> = new Set(),
 ): React.ReactNode[] {
   const tokens = tokenize(content)
-  return tokens.map((token, i) => renderToken(token, i, allPages, onNavigate, onOpenSidebar, onNavigateToBlock))
+  return tokens.map((token, i) => renderToken(token, i, allPages, onNavigate, onOpenSidebar, onNavigateToBlock, visitedBlockIds))
 }
 
 function tokenize(text: string): Token[] {
@@ -215,6 +216,7 @@ function renderToken(
   onNavigate: (id: string, title?: string) => void,
   onOpenSidebar: (id: string) => void,
   onNavigateToBlock?: (pageId: string, pageTitle: string, blockId: string) => void,
+  visitedBlockIds: Set<string> = new Set(),
 ): React.ReactNode {
   switch (token.type) {
     case 'text':
@@ -298,26 +300,62 @@ function renderToken(
       )
 
     case 'blockref': {
+      // Guard against circular references (block A → block B → block A → ...)
+      if (visitedBlockIds.has(token.id)) {
+        return (
+          <span key={key} className="block-ref block-ref-missing" title="Circular block reference">
+            <span className="block-ref-brackets">((</span>
+            <span className="block-ref-content">{token.id}</span>
+            <span className="block-ref-brackets">))</span>
+          </span>
+        )
+      }
+
       const found = findBlockById(allPages, token.id)
-      const refText = found ? found.block.content : token.id
-      const refPageId = found?.page.id
-      const refPageTitle = found?.page.title
+      if (!found) {
+        return (
+          <span key={key} className="block-ref block-ref-missing" title={`Block not found: ${token.id}`}>
+            <span className="block-ref-brackets">((</span>
+            <span className="block-ref-content">{token.id}</span>
+            <span className="block-ref-brackets">))</span>
+          </span>
+        )
+      }
+
+      const { block, page } = found
+      const firstLevelChildren = block.children ?? []
+      const hasChildren = firstLevelChildren.length > 0
+      const nextVisited = new Set(visitedBlockIds).add(token.id)
+
       return (
         <span
           key={key}
-          className={`block-ref ${found ? 'block-ref-found' : 'block-ref-missing'}`}
-          title={found ? `From "${refPageTitle}"` : `Block not found: ${token.id}`}
-          onClick={found ? (e) => {
+          className={`block-ref block-ref-found${hasChildren ? ' block-ref-has-children' : ''}`}
+          title={`From "${page.title}"`}
+          onClick={(e) => {
             e.preventDefault()
             e.stopPropagation()
-            if (e.shiftKey) onOpenSidebar(refPageId!)
-            else if (onNavigateToBlock) onNavigateToBlock(refPageId!, refPageTitle!, token.id)
-            else onNavigate(refPageId!, refPageTitle)
-          } : undefined}
+            if (e.shiftKey) onOpenSidebar(page.id)
+            else if (onNavigateToBlock) onNavigateToBlock(page.id, page.title, token.id)
+            else onNavigate(page.id, page.title)
+          }}
         >
-          <span className="block-ref-brackets">((</span>
-          <span className="block-ref-content">{refText}</span>
-          <span className="block-ref-brackets">))</span>
+          <span className="block-ref-line">
+            <span className="block-ref-brackets">((</span>
+            <span className="block-ref-content">
+              {parseContent(block.content, allPages, onNavigate, onOpenSidebar, onNavigateToBlock, nextVisited)}
+            </span>
+            <span className="block-ref-brackets">))</span>
+          </span>
+          {hasChildren && (
+            <span className="block-ref-children">
+              {firstLevelChildren.map((child) => (
+                <span key={child.id} className="block-ref-child">
+                  {parseContent(child.content, allPages, onNavigate, onOpenSidebar, onNavigateToBlock, nextVisited)}
+                </span>
+              ))}
+            </span>
+          )}
         </span>
       )
     }

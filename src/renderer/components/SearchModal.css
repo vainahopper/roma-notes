@@ -167,9 +167,15 @@
   margin-right: 4px;
 }
 
-.search-create {
+.search-create-bar {
   border-top: 1px solid var(--border-subtle);
-  margin-top: 4px;
+  padding: 4px 6px;
+  flex-shrink: 0;
+}
+
+.search-create {
+  border-top: none;
+  margin-top: 0;
 }
 
 mark {

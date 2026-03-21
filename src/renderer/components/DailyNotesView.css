@@ -120,6 +120,14 @@
   padding-left: 2px;
 }
 
+/* ─── Linked refs inside a day entry ─────────────────────── */
+
+.day-entry-linked-refs .linked-refs {
+  border-top: 1px solid var(--border-subtle);
+  margin-top: 24px;
+  padding: 16px 0 0;
+}
+
 /* ─── Load more ───────────────────────────────────────────── */
 
 .daily-notes-end {

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import type { Page, Block } from '../../shared/types'
 import { generateId, todayPageId, todayPageTitle } from '../utils/helpers'
 import { platform } from '../platform'
@@ -11,6 +11,7 @@ let storeState = {
   loaded: false,
   loading: false,
   loadError: false,
+  pagesVersion: 0,
 }
 
 function notify() {
@@ -34,7 +35,7 @@ export async function loadAllPages() {
     for (const p of pages) {
       map.set(p.id, p)
     }
-    storeState = { pages: map, loaded: true, loading: false, loadError: false }
+    storeState = { pages: map, loaded: true, loading: false, loadError: false, pagesVersion: storeState.pagesVersion + 1 }
   } catch (err) {
     console.error('Failed to load pages:', err)
     // Do NOT set loaded:true here — an empty pages map would cause getOrCreateDailyPage
@@ -86,6 +87,7 @@ export function getOrCreateDailyPage(dateId: string, dateTitle: string): Page {
 export async function savePage(page: Page) {
   page.updatedAt = new Date().toISOString()
   storeState.pages.set(page.id, page)
+  storeState = { ...storeState, pagesVersion: storeState.pagesVersion + 1 }
   notify()
   // Persist
   await platform.savePage(page)
@@ -93,6 +95,7 @@ export async function savePage(page: Page) {
 
 export async function deletePage(id: string) {
   storeState.pages.delete(id)
+  storeState = { ...storeState, pagesVersion: storeState.pagesVersion + 1 }
   notify()
   await platform.deletePage(id)
 }
@@ -117,6 +120,7 @@ export function importPages(pages: Page[]) {
   for (const page of pages) {
     storeState.pages.set(page.id, page)
   }
+  storeState = { ...storeState, pagesVersion: storeState.pagesVersion + 1 }
   notify()
   // Save all
   pages.forEach(p => platform.savePage(p))
@@ -138,7 +142,10 @@ export function mergeSyncedPages(pages: Page[]) {
       changed = true
     }
   }
-  if (changed) notify()
+  if (changed) {
+    storeState = { ...storeState, pagesVersion: storeState.pagesVersion + 1 }
+    notify()
+  }
 }
 
 /**
@@ -153,7 +160,7 @@ export async function forceReloadPages() {
     for (const p of pages) {
       map.set(p.id, p)
     }
-    storeState = { pages: map, loaded: true, loading: false, loadError: false }
+    storeState = { pages: map, loaded: true, loading: false, loadError: false, pagesVersion: storeState.pagesVersion + 1 }
     notify()
   } catch (err) {
     console.error('[Roma] forceReloadPages failed:', err)
@@ -167,12 +174,13 @@ export function useStore() {
 
   const listenerRef = useRef<Listener>(() => rerender(n => n + 1))
 
-  // Register/unregister listener
-  if (!listeners.has(listenerRef.current)) {
-    listeners.add(listenerRef.current)
-  }
+  // Register on mount, unregister on unmount to prevent listener leaks
+  useEffect(() => {
+    const listener = listenerRef.current
+    listeners.add(listener)
+    return () => { listeners.delete(listener) }
+  }, [])
 
-  // Note: cleanup happens in useEffect in component
   return storeState
 }
 

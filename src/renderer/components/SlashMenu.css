@@ -9,6 +9,13 @@
   padding: 4px;
 }
 
+@media (max-width: 768px) {
+  .slash-menu {
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+    max-height: 40vh;
+  }
+}
+
 .slash-menu-header {
   padding: 6px 12px 4px;
   font-size: 10px;

@@ -364,9 +364,8 @@ function applyUpdate(win, info) {
 
         sendProgress('Done', 100)
 
-        const { spawn } = require('child_process')
         setTimeout(() => {
-          spawn('open', ['-n', destApp], { detached: true, stdio: 'ignore' }).unref()
+          app.relaunch()
           app.exit(0)
         }, 800)
       } catch (err) {
@@ -737,8 +736,8 @@ ipcMain.handle('shell:openExternal', (_, url) => {
 })
 
 // iCloud sync
-ipcMain.handle('sync:pull', () => {
-  const merged = pullFromICloud()
+ipcMain.handle('sync:pull', async () => {
+  const merged = await pullFromICloud()
   return { merged: merged.length, pages: merged }
 })
 

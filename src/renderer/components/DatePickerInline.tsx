@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
+import { getMobilePopupStyle } from '../utils/helpers'
 import './DatePickerInline.css'
 
 interface Props {
@@ -93,7 +94,5 @@ export function DatePickerInline({ anchorRef, onSelect, onClose }: Props) {
 }
 
 function getDropdownStyle(anchorRef: React.RefObject<HTMLTextAreaElement | null>): React.CSSProperties {
-  if (!anchorRef.current) return { position: 'fixed', top: 0, left: 0, zIndex: 500 }
-  const rect = anchorRef.current.getBoundingClientRect()
-  return { position: 'fixed', top: rect.bottom + 4, left: rect.left, zIndex: 500 }
+  return getMobilePopupStyle(anchorRef, true)
 }

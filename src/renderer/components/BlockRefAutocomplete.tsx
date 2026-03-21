@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import type { Page, Block } from '../../shared/types'
-import { stripMarkdown } from '../utils/helpers'
+import { stripMarkdown, getMobilePopupStyle } from '../utils/helpers'
 import Fuse from 'fuse.js'
 import './BlockRefAutocomplete.css'
 
@@ -22,16 +22,19 @@ interface Props {
 export function BlockRefAutocomplete({ query, allPages, anchorRef, onSelect, onClose }: Props) {
   const [selected, setSelected] = useState(0)
 
-  // Build flat list of all blocks
-  const allBlocks: BlockResult[] = []
-  for (const [, page] of allPages) {
-    function collect(block: Block) {
-      const text = stripMarkdown(block.content)
-      if (text.trim()) allBlocks.push({ blockId: block.id, blockContent: text, pageTitle: page.title, pageId: page.id })
-      block.children.forEach(collect)
+  // Build flat list of all blocks — memoized so keystrokes don't trigger a full traversal
+  const allBlocks = useMemo(() => {
+    const results: BlockResult[] = []
+    for (const [, page] of allPages) {
+      function collect(block: Block) {
+        const text = stripMarkdown(block.content)
+        if (text.trim()) results.push({ blockId: block.id, blockContent: text, pageTitle: page.title, pageId: page.id })
+        ;(block.children ?? []).forEach(collect)
+      }
+      page.blocks.forEach(collect)
     }
-    page.blocks.forEach(collect)
-  }
+    return results
+  }, [allPages])
 
   const results: BlockResult[] = query.trim()
     ? new Fuse(allBlocks, { keys: ['blockContent'], threshold: 0.4, ignoreLocation: true }).search(query, { limit: 8 }).map(r => r.item)
@@ -54,10 +57,7 @@ export function BlockRefAutocomplete({ query, allPages, anchorRef, onSelect, onC
 
   if (results.length === 0) return null
 
-  const rect = anchorRef.current?.getBoundingClientRect()
-  const style: React.CSSProperties = rect
-    ? { position: 'fixed', top: rect.bottom + 4, left: rect.left, zIndex: 500 }
-    : { position: 'fixed', top: 0, left: 0, zIndex: 500 }
+  const style = getMobilePopupStyle(anchorRef)
 
   return (
     <div className="blockref-autocomplete" style={style}>

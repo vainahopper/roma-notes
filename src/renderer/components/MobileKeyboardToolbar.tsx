@@ -75,6 +75,7 @@ export function MobileKeyboardToolbar() {
       if (next?.tagName === 'TEXTAREA' && next.closest('.block-item')) return
       // Stay visible if focus moves to the toolbar itself
       if (next?.closest('.mobile-kb-toolbar')) return
+      if (hideTimerRef.current) clearTimeout(hideTimerRef.current)
       hideTimerRef.current = setTimeout(() => {
         setVisible(false)
         setBottomOffset(0)
@@ -108,6 +109,14 @@ export function MobileKeyboardToolbar() {
     ta.focus()
   }
 
+  const handleSlash = (e: React.MouseEvent) => {
+    e.preventDefault()
+    const ta = document.activeElement as HTMLTextAreaElement
+    if (!ta || ta.tagName !== 'TEXTAREA') return
+    insertAtCursor('/')
+    ta.focus()
+  }
+
   const handleIndent = (e: React.MouseEvent) => {
     e.preventDefault()
     simulateKeyDown('Tab', false)
@@ -123,6 +132,11 @@ export function MobileKeyboardToolbar() {
       <button className="mobile-kb-btn" onMouseDown={handleWikilink} title="Insert page link">
         <span className="mobile-kb-btn-label">[[</span>
         <span className="mobile-kb-btn-sub">Page</span>
+      </button>
+      <div className="mobile-kb-sep" />
+      <button className="mobile-kb-btn" onMouseDown={handleSlash} title="Commands">
+        <span className="mobile-kb-btn-label">/</span>
+        <span className="mobile-kb-btn-sub">Cmds</span>
       </button>
       <div className="mobile-kb-sep" />
       <button className="mobile-kb-btn" onMouseDown={handleIndent} title="Indent (Tab)">

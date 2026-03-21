@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { getMobilePopupStyle } from '../utils/helpers'
 import './SlashMenu.css'
 
 export interface SlashCommand {
@@ -72,8 +73,4 @@ export function SlashMenu({ query, commands, anchorRef, onClose }: Props) {
   )
 }
 
-function getStyle(anchorRef: React.RefObject<HTMLTextAreaElement | null>): React.CSSProperties {
-  if (!anchorRef.current) return { position: 'fixed', top: 0, left: 0, zIndex: 500 }
-  const rect = anchorRef.current.getBoundingClientRect()
-  return { position: 'fixed', top: rect.bottom + 4, left: rect.left, zIndex: 500 }
-}
+const getStyle = getMobilePopupStyle

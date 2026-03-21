@@ -4,7 +4,7 @@ import { BlockEditor } from './BlockEditor'
 import { BlockContent } from './BlockContent'
 import { LinkedReferences } from './LinkedReferences'
 import { savePage, deletePage, createNewPage } from '../stores/useStore'
-import { isDatePage } from '../utils/helpers'
+import { isDatePage, findBlocksWithLink } from '../utils/helpers'
 import './PageView.css'
 
 interface Props {
@@ -136,8 +136,8 @@ export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDele
       const matchingBlocks = findBlocksWithLink(p.blocks, pageTitleLower, pageIdLower)
       if (matchingBlocks.length > 0) results.push({ page: p, blocks: matchingBlocks })
     }
-    // Sort most-recently-updated pages first
-    return results.sort((a, b) => new Date(b.page.updatedAt).getTime() - new Date(a.page.updatedAt).getTime())
+    // Sort most-recently-created pages first (creation date = the day for daily notes)
+    return results.sort((a, b) => new Date(b.page.createdAt).getTime() - new Date(a.page.createdAt).getTime())
   }, [page.id, page.title, allPages])
 
   // Build a Set of block IDs that are already linked (for filtering unlinked)
@@ -161,8 +161,8 @@ export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDele
       )
       if (matchingBlocks.length > 0) results.push({ page: p, blocks: matchingBlocks })
     }
-    // Sort most-recently-updated pages first
-    return results.sort((a, b) => new Date(b.page.updatedAt).getTime() - new Date(a.page.updatedAt).getTime())
+    // Sort most-recently-created pages first (creation date = the day for daily notes)
+    return results.sort((a, b) => new Date(b.page.createdAt).getTime() - new Date(a.page.createdAt).getTime())
   }, [page.id, title, allPages, linkedBlockIds])
 
   // ── TODO page: collect all todo blocks across all pages ──────────────────────
@@ -390,18 +390,6 @@ function ensureWikilinkPages(blocks: Block[], allPages: Map<string, Page>) {
   }
 }
 
-function findBlocksWithLink(blocks: Block[], titleLower: string, idLower: string): Block[] {
-  const results: Block[] = []
-  function traverse(block: Block) {
-    const contentLower = block.content.toLowerCase()
-    if (contentLower.includes(`[[${titleLower}]]`) || contentLower.includes(`[[${idLower}]]`)) {
-      results.push(block)
-    }
-    block.children.forEach(traverse)
-  }
-  blocks.forEach(traverse)
-  return results
-}
 
 function findBlocksWithUnlinkedMention(blocks: Block[], title: string): Block[] {
   const results: Block[] = []

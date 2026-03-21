@@ -1,13 +1,15 @@
-import React, { useEffect, useRef, useCallback, useState } from 'react'
+import React, { useEffect, useRef, useCallback, useState, useMemo } from 'react'
 import type { Page, Block } from '../../shared/types'
 import { BlockEditor } from './BlockEditor'
+import { LinkedReferences } from './LinkedReferences'
 import { savePage, getOrCreateDailyPage, createNewPage } from '../stores/useStore'
-import { generateId, dateToPageId, dateToPageTitle, parseDatePage } from '../utils/helpers'
+import { generateId, dateToPageId, dateToPageTitle, parseDatePage, findBlocksWithLink } from '../utils/helpers'
 import { subDays, format } from 'date-fns'
 import './DailyNotesView.css'
 
 interface Props {
   allPages: Map<string, Page>
+  pagesVersion: number
   onNavigate: (id: string, title?: string) => void
   onOpenSidebar: (id: string) => void
   onZoomToBlock: (pageId: string, pageTitle: string, blockId: string) => void
@@ -17,7 +19,7 @@ interface Props {
 const DAYS_TO_LOAD = 7
 const DAYS_EXTRA = 5
 
-export function DailyNotesView({ allPages, onNavigate, onOpenSidebar, onZoomToBlock, scrollToDate }: Props) {
+export function DailyNotesView({ allPages, pagesVersion, onNavigate, onOpenSidebar, onZoomToBlock, scrollToDate }: Props) {
   const [oldestDayOffset, setOldestDayOffset] = useState(DAYS_TO_LOAD - 1)
   const containerRef = useRef<HTMLDivElement>(null)
   const loadingMoreRef = useRef(false)
@@ -32,13 +34,16 @@ export function DailyNotesView({ allPages, onNavigate, onOpenSidebar, onZoomToBl
     dates.push(subDays(today, i))
   }
 
-  dates.forEach(date => {
-    const id = dateToPageId(date)
-    const title = dateToPageTitle(date)
-    if (!allPages.has(id)) {
-      getOrCreateDailyPage(id, title)
-    }
-  })
+  useEffect(() => {
+    dates.forEach(date => {
+      const id = dateToPageId(date)
+      const title = dateToPageTitle(date)
+      if (!allPages.has(id)) {
+        getOrCreateDailyPage(id, title)
+      }
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [oldestDayOffset, allPages])
 
   // Always scroll to top on mount (today is at top)
   useEffect(() => {
@@ -86,9 +91,9 @@ export function DailyNotesView({ allPages, onNavigate, onOpenSidebar, onZoomToBl
       if (distanceFromBottom < 300) {
         loadingMoreRef.current = true
         setOldestDayOffset(prev => prev + DAYS_EXTRA)
-        requestAnimationFrame(() => {
-          loadingMoreRef.current = false
-        })
+        // Use a short timeout instead of rAF so the guard stays active long enough
+        // for React to re-render the new days before allowing another load.
+        setTimeout(() => { loadingMoreRef.current = false }, 200)
       }
     }
   }, [])
@@ -122,6 +127,7 @@ export function DailyNotesView({ allPages, onNavigate, onOpenSidebar, onZoomToBl
               key={id}
               page={page}
               allPages={allPages}
+              pagesVersion={pagesVersion}
               onNavigate={onNavigate}
               onOpenSidebar={onOpenSidebar}
               onZoomToBlock={onZoomToBlock}
@@ -152,26 +158,43 @@ export function DailyNotesView({ allPages, onNavigate, onOpenSidebar, onZoomToBl
 interface DayEntryProps {
   page: Page
   allPages: Map<string, Page>
+  pagesVersion: number
   onNavigate: (id: string, title?: string) => void
   onOpenSidebar: (id: string) => void
   onZoomToBlock: (pageId: string, pageTitle: string, blockId: string) => void
   isToday: boolean
 }
 
-function DayEntry({ page, allPages, onNavigate, onOpenSidebar, onZoomToBlock, isToday }: DayEntryProps) {
+function DayEntry({ page, allPages, pagesVersion, onNavigate, onOpenSidebar, onZoomToBlock, isToday }: DayEntryProps) {
   const [blocks, setBlocks] = useState<Block[]>(page.blocks)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const allPagesRef = useRef(allPages)
   allPagesRef.current = allPages
+  // Track the last updatedAt we accepted from the store (to detect iCloud-driven updates)
+  const lastSyncedAtRef = useRef(page.updatedAt)
 
+  // page.id changed → always sync blocks (navigated to a different page)
   useEffect(() => {
+    lastSyncedAtRef.current = page.updatedAt
     setBlocks(page.blocks)
-  }, [page.id])
+  }, [page.id])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // page.updatedAt changed → iCloud (or another device) pushed a newer version.
+  // Only apply if the user has no pending local save to avoid overwriting unsaved edits.
+  useEffect(() => {
+    if (page.updatedAt <= lastSyncedAtRef.current) return
+    if (saveTimerRef.current) return  // user is actively editing — skip, their save will win
+    lastSyncedAtRef.current = page.updatedAt
+    setBlocks(page.blocks)
+  }, [page.updatedAt, page.blocks])
 
   const triggerSave = useCallback((newBlocks: Block[]) => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     saveTimerRef.current = setTimeout(() => {
-      savePage({ ...page, blocks: newBlocks })
+      saveTimerRef.current = null
+      const saved = { ...page, blocks: newBlocks }
+      lastSyncedAtRef.current = new Date().toISOString()
+      savePage(saved)
     }, 500)
   }, [page])
 
@@ -191,6 +214,49 @@ function DayEntry({ page, allPages, onNavigate, onOpenSidebar, onZoomToBlock, is
   const handleZoom = useCallback((blockId: string) => {
     onZoomToBlock(page.id, page.title, blockId)
   }, [page.id, page.title, onZoomToBlock])
+
+  // Backlinks: blocks from other pages that mention [[this day's title]]
+  const backlinks = useMemo(() => {
+    const pageTitleLower = page.title.toLowerCase()
+    const pageIdLower = page.id.toLowerCase()
+    const results: { page: Page; blocks: Block[] }[] = []
+    for (const [, p] of allPages) {
+      if (p.id === page.id) continue
+      const matching = findBlocksWithLink(p.blocks, pageTitleLower, pageIdLower)
+      if (matching.length > 0) results.push({ page: p, blocks: matching })
+    }
+    return results.sort((a, b) => new Date(b.page.updatedAt).getTime() - new Date(a.page.updatedAt).getTime())
+  }, [page.id, page.title, allPages, pagesVersion])
+
+  const handleToggleTodo = useCallback((pageId: string, blockId: string) => {
+    const target = allPages.get(pageId)
+    if (!target) return
+    function toggle(bs: Block[]): Block[] {
+      return bs.map(b => {
+        if (b.id === blockId) {
+          const next = b.checked === true ? false : true
+          const newContent = b.content
+            .replace(/\{\{\[\[TODO\]\]\}\}|{{TODO}}/gi, '')
+            .replace(/\{\{\[\[DONE\]\]\}\}|{{DONE}}/gi, '')
+            .trim()
+          return { ...b, checked: next, content: newContent }
+        }
+        return { ...b, children: toggle(b.children) }
+      })
+    }
+    savePage({ ...target, blocks: toggle(target.blocks) })
+  }, [allPages])
+
+  const handleEditBlock = useCallback((pageId: string, blockId: string, content: string) => {
+    const target = allPages.get(pageId)
+    if (!target) return
+    function update(bs: Block[]): Block[] {
+      return bs.map(b => b.id === blockId
+        ? { ...b, content, updatedAt: new Date().toISOString() }
+        : { ...b, children: update(b.children) })
+    }
+    savePage({ ...target, blocks: update(target.blocks) })
+  }, [allPages])
 
   const date = parseDatePage(page.id)
   const dayLabel = date ? format(date, 'EEEE') : ''
@@ -221,9 +287,23 @@ function DayEntry({ page, allPages, onNavigate, onOpenSidebar, onZoomToBlock, is
           onBlur={handleEditorBlur}
         />
       </div>
+      {backlinks.length > 0 && (
+        <div className="day-entry-linked-refs">
+          <LinkedReferences
+            backlinks={backlinks}
+            allPages={allPages}
+            onNavigate={onNavigate}
+            onNavigateToBlock={onZoomToBlock}
+            onToggleBlock={handleToggleTodo}
+            onEditBlock={handleEditBlock}
+            title="Linked References"
+          />
+        </div>
+      )}
     </div>
   )
 }
+
 
 const WIKILINK_RE = /\[\[([^\]]+)\]\]/g
 

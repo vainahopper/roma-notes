@@ -8,6 +8,13 @@
   user-select: none;
 }
 
+@media (max-width: 768px) {
+  .date-picker-inline {
+    width: 280px;
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+  }
+}
+
 .dp-header {
   display: flex;
   align-items: center;

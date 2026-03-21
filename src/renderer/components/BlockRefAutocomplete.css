@@ -9,6 +9,14 @@
   padding: 4px;
 }
 
+@media (max-width: 768px) {
+  .blockref-autocomplete {
+    min-width: unset;
+    max-height: 40vh;
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+  }
+}
+
 .blockref-header {
   padding: 6px 12px 4px;
   font-size: 10px;

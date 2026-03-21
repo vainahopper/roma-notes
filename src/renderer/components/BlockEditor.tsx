@@ -162,6 +162,7 @@ interface Props {
 export function BlockEditor({ blocks, onChange, allPages, onNavigate, onOpenSidebar, scrollToBlockId, onClearScrollTarget, zoomedBlockId, onZoom, onNavigateToBlock, onBlur }: Props) {
   const focusIdRef = useRef<string | null>(null)
   const editorRef = useRef<HTMLDivElement>(null)
+  const emptyBlockIdRef = useRef(generateId())
 
   // Always-current refs so effects never have stale closures
   const blocksRef = useRef(blocks)
@@ -338,6 +339,9 @@ export function BlockEditor({ blocks, onChange, allPages, onNavigate, onOpenSide
     }
   }, [])
 
+  // Used to trigger a re-render when arrow navigation changes focus (no onChange call)
+  const [, setFocusTick] = React.useState(0)
+
   // ─── Block tree manipulation helpers ─────────────────────────────────────────
 
   function updateBlock(id: string, updater: (b: Block) => Block, list: Block[]): Block[] {
@@ -447,6 +451,17 @@ export function BlockEditor({ blocks, onChange, allPages, onNavigate, onOpenSide
     }, 1500)
 
     const now = new Date().toISOString()
+
+    // When zoomed into a childless block the editor shows a phantom placeholder block
+    // (emptyBlockIdRef) that does not exist in the tree.  On the very first keystroke,
+    // materialise it as a real child of the zoomed block so all subsequent operations work.
+    if (zoomedBlockId && !_findBlock(id, blocks)) {
+      const newBlock: Block = { id, content, children: [], checked: null, createdAt: now, updatedAt: now }
+      const newBlocks = _updateBlock(zoomedBlockId, b => ({ ...b, children: [...b.children, newBlock] }), blocks)
+      onChange(newBlocks)
+      return
+    }
+
     const newBlocks = updateBlock(id, b => ({
       ...b,
       content,
@@ -454,7 +469,7 @@ export function BlockEditor({ blocks, onChange, allPages, onNavigate, onOpenSide
       updatedAt: now,
     }), blocks)
     onChange(newBlocks)
-  }, [blocks, onChange])
+  }, [blocks, onChange, zoomedBlockId])
 
   const handleUndo = useCallback(() => {
     // Flush any pending text batch first so it becomes undoable
@@ -506,12 +521,43 @@ export function BlockEditor({ blocks, onChange, allPages, onNavigate, onOpenSide
   const handleEnter = useCallback((id: string, cursorPos: number, content: string) => {
     flushAndPushHistory(blocks)
 
+    // Phantom placeholder block in zoom mode (not yet in tree) — materialise it and split.
+    if (zoomedBlockId && !findBlock(id, blocks)) {
+      const now = new Date().toISOString()
+      const before = content.slice(0, cursorPos)
+      const after = content.slice(cursorPos)
+      const newId = generateId()
+      const newBlock: Block = { id: newId, content: after, children: [], checked: null, createdAt: now, updatedAt: now }
+      const thisBlock: Block = { id, content: before, children: [], checked: null, createdAt: now, updatedAt: now }
+      const newBlocks = _updateBlock(zoomedBlockId, b => ({
+        ...b,
+        children: [...b.children, thisBlock, newBlock],
+      }), blocks)
+      focusIdRef.current = newId
+      onChange(newBlocks)
+      return
+    }
+
     if (!content.trim()) {
       const result = findIndexInParent(id, blocks)
-      if (!result) return
+      if (!result) {
+        // Still a phantom placeholder (empty, never typed into) — do nothing.
+        return
+      }
       const { index, parent } = result
 
-      if (parent === blocks) return
+      // Treat as root when either at actual page root, or at the top level inside a zoom scope.
+      const zoomedBlockNode = zoomedBlockId ? findBlock(zoomedBlockId, blocks) : null
+      const isAtRootLevel = parent === blocks || (zoomedBlockNode != null && zoomedBlockNode.children === parent)
+      if (isAtRootLevel) {
+        // Empty root-level block: create a new empty sibling after it (Roam behaviour)
+        const newId = generateId()
+        const now = new Date().toISOString()
+        const newBlock: Block = { id: newId, content: '', children: [], checked: null, createdAt: now, updatedAt: now }
+        focusIdRef.current = newId
+        onChange(insertAfter(id, newBlock, blocks))
+        return
+      }
 
       let grandParentList: Block[] = blocks
       let parentBlockId: string | null = null
@@ -556,9 +602,9 @@ export function BlockEditor({ blocks, onChange, allPages, onNavigate, onOpenSide
     const now = new Date().toISOString()
     const newBlock: Block = { id: newId, content: after, children: [], checked: null, createdAt: now, updatedAt: now }
 
-    // Cursor at end of a block with children → new block becomes first child (descend)
-    // Cursor mid-block → split: "after" becomes sibling at same level
-    if (block.children.length > 0 && cursorPos >= content.length) {
+    // Block has children → new block always becomes first child (stays right below current line)
+    // Block has no children → new block is a sibling inserted after
+    if (block.children.length > 0) {
       newBlocks = updateBlock(id, b => ({ ...b, children: [newBlock, ...b.children] }), newBlocks)
     } else {
       newBlocks = insertAfter(id, newBlock, newBlocks)
@@ -566,13 +612,16 @@ export function BlockEditor({ blocks, onChange, allPages, onNavigate, onOpenSide
 
     focusIdRef.current = newId
     onChange(newBlocks)
-  }, [blocks, onChange, flushAndPushHistory])
+  }, [blocks, onChange, flushAndPushHistory, zoomedBlockId])
 
   const handleBackspace = useCallback((id: string, isEmpty: boolean, isCollapsed?: boolean) => {
     if (!isEmpty) return
     flushAndPushHistory(blocks)
 
-    const flat = flattenBlocks(blocks)
+    // In zoom mode restrict navigation to the visible subtree so focus never
+    // lands on a block that isn't rendered (e.g. the zoomed block itself).
+    const scopeBlocks = zoomedBlockId ? (_findBlock(zoomedBlockId, blocks)?.children ?? blocks) : blocks
+    const flat = flattenBlocks(scopeBlocks)
     const idx = flat.findIndex(b => b.id === id)
 
     if (idx === 0 && flat.length === 1) {
@@ -596,14 +645,21 @@ export function BlockEditor({ blocks, onChange, allPages, onNavigate, onOpenSide
     }
 
     let newBlocks = removeBlock(id, blocks)
-    if (block.children.length > 0 && prevBlock) {
-      newBlocks = updateBlock(prevBlock.id, pb => ({
-        ...pb,
-        children: [...pb.children, ...block.children],
-      }), newBlocks)
+    if (block.children.length > 0) {
+      if (prevBlock) {
+        newBlocks = updateBlock(prevBlock.id, pb => ({
+          ...pb,
+          children: [...pb.children, ...block.children],
+        }), newBlocks)
+      } else {
+        // Deleting the first root block — promote its children to root level so they
+        // are not silently orphaned (lost) along with the deleted parent.
+        newBlocks = [...block.children, ...newBlocks]
+        focusIdRef.current = block.children[0].id
+      }
     }
     onChange(newBlocks)
-  }, [blocks, onChange, flushAndPushHistory])
+  }, [blocks, onChange, flushAndPushHistory, zoomedBlockId])
 
   const handleTab = useCallback((id: string, shift: boolean) => {
     flushAndPushHistory(blocks)
@@ -614,6 +670,11 @@ export function BlockEditor({ blocks, onChange, allPages, onNavigate, onOpenSide
 
     if (shift) {
       if (parent === blocks) return
+      // In zoom mode, also prevent outdenting first-level children of the zoomed block
+      if (zoomedBlockId) {
+        const zoomedBlock = findBlock(zoomedBlockId, blocks)
+        if (zoomedBlock && zoomedBlock.children === parent) return
+      }
 
       let grandParentList: Block[] = blocks
       let parentBlockId: string | null = null
@@ -659,19 +720,27 @@ export function BlockEditor({ blocks, onChange, allPages, onNavigate, onOpenSide
       focusIdRef.current = blockToMove.id
       onChange(newBlocks)
     }
-  }, [blocks, onChange, flushAndPushHistory])
+  }, [blocks, onChange, flushAndPushHistory, zoomedBlockId])
 
   const handleArrowUp = useCallback((id: string) => {
-    const flat = flattenBlocks(blocks)
+    const scopeBlocks = zoomedBlockId ? (_findBlock(zoomedBlockId, blocks)?.children ?? blocks) : blocks
+    const flat = flattenBlocks(scopeBlocks)
     const idx = flat.findIndex(b => b.id === id)
-    if (idx > 0) focusIdRef.current = flat[idx - 1].id
-  }, [blocks])
+    if (idx > 0) {
+      focusIdRef.current = flat[idx - 1].id
+      setFocusTick(t => t + 1)
+    }
+  }, [blocks, zoomedBlockId])
 
   const handleArrowDown = useCallback((id: string) => {
-    const flat = flattenBlocks(blocks)
+    const scopeBlocks = zoomedBlockId ? (_findBlock(zoomedBlockId, blocks)?.children ?? blocks) : blocks
+    const flat = flattenBlocks(scopeBlocks)
     const idx = flat.findIndex(b => b.id === id)
-    if (idx < flat.length - 1) focusIdRef.current = flat[idx + 1].id
-  }, [blocks])
+    if (idx < flat.length - 1) {
+      focusIdRef.current = flat[idx + 1].id
+      setFocusTick(t => t + 1)
+    }
+  }, [blocks, zoomedBlockId])
 
   const handlePasteBlocks = useCallback((id: string, contentBefore: string, contentAfter: string, pastedText: string) => {
     flushAndPushHistory(blocks)
@@ -990,7 +1059,7 @@ export function BlockEditor({ blocks, onChange, allPages, onNavigate, onOpenSide
 
   const zoomedBlock = zoomedBlockId ? _findBlock(zoomedBlockId, blocks) : null
   const rootBlocks = zoomedBlock ? zoomedBlock.children : blocks
-  const displayBlocks = rootBlocks.length > 0 ? rootBlocks : [{ id: generateId(), content: '', children: [], checked: null }]
+  const displayBlocks = rootBlocks.length > 0 ? rootBlocks : [{ id: emptyBlockIdRef.current, content: '', children: [], checked: null, createdAt: '', updatedAt: '' }]
 
   return (
     <div

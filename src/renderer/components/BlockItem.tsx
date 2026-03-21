@@ -206,16 +206,14 @@ export function BlockItem({
         e.clipboardData.setData('text/plain', `- ${content}`)
       }
     } else {
-      // Partial selection: just prepend the bullet to whatever text is selected
-      e.preventDefault()
-      const selected = content.slice(selStart, selEnd)
-      e.clipboardData.setData('text/plain', `- ${selected}`)
+      // Partial selection: copy just the selected text without a bullet prefix
+      // (the user is copying a fragment, not a whole block)
     }
   }, [block, content])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     const anyMenuOpen = showWikilink || showBlockRef || showSlash
-    if (anyMenuOpen && ['ArrowUp', 'ArrowDown', 'Enter', 'Tab'].includes(e.key)) return
+    if (anyMenuOpen && ['ArrowUp', 'ArrowDown', 'Enter', 'Tab'].includes(e.key)) { e.preventDefault(); return }
     if (anyMenuOpen && e.key === 'Escape') { e.preventDefault(); closeAllMenus(); return }
 
     const ta = textareaRef.current
@@ -429,7 +427,7 @@ export function BlockItem({
         if (e.ctrlKey || e.metaKey) { e.preventDefault(); setEncryptModal(true) }
         break
     }
-  }, [block.id, content, showWikilink, showBlockRef, showSlash, closeAllMenus, setEncryptModal, onEnter, onBackspace, onTab, onArrowUp, onArrowDown, onToggleCheck, onToggleTodo, onChange])
+  }, [block.id, content, collapsed, showWikilink, showBlockRef, showSlash, closeAllMenus, setEncryptModal, onEnter, onBackspace, onTab, onArrowUp, onArrowDown, onToggleCheck, onToggleTodo, onChange])
 
   const handleSelectPage = useCallback((page: Page) => {
     const ta = textareaRef.current
@@ -465,78 +463,74 @@ export function BlockItem({
     setTimeout(() => { ta?.focus(); ta?.setSelectionRange(newBefore.length, newBefore.length) }, 0)
   }, [block.id, content, onChange])
 
-  const applySlashCommand = useCallback((fn: () => void) => {
+  // fn receives (cleanedContent, cleanedCursor) — the content with the slash command
+  // stripped and the cursor position within that cleaned content. Use these instead of
+  // ta.value / ta.selectionStart to avoid operating on stale data before re-render.
+  const applySlashCommand = useCallback((fn: (cleanedContent: string, cleanedCursor: number) => void) => {
     const ta = textareaRef.current
     const cursor = ta?.selectionStart ?? content.length
     const textBefore = content.slice(0, cursor)
     const newBefore = textBefore.replace(/(?:^|\s)\/[^/\n]*$/, m => m.startsWith('/') ? '' : m.slice(0, m.indexOf('/')))
     const newContent = newBefore + content.slice(cursor)
-    setContent(newContent); onChange(block.id, newContent); closeAllMenus()
-    fn()
+    const newCursor = newBefore.length
+    closeAllMenus()
+    fn(newContent, newCursor)
     setTimeout(() => ta?.focus(), 0)
   }, [block.id, content, onChange, closeAllMenus])
 
   const slashCommands: SlashCommand[] = [
     { id: 'todo', label: 'To-do', description: 'Toggle todo checkbox (⌘↵)', icon: '☐',
-      action: () => applySlashCommand(() => onToggleTodo(block.id)) },
+      action: () => applySlashCommand((base) => { setContent(base); onChange(block.id, base); onToggleTodo(block.id) }) },
     { id: 'page', label: 'Page link', description: 'Link to a page [[…]]', icon: '📄',
-      action: () => applySlashCommand(() => {
-        const ta = textareaRef.current; if (!ta) return
-        const c = ta.selectionStart; const v = ta.value
-        const nv = v.slice(0,c)+'[[]]'+v.slice(c)
+      action: () => applySlashCommand((base, cur) => {
+        const ta = textareaRef.current
+        const nv = base.slice(0, cur) + '[[]]' + base.slice(cur)
         setContent(nv); onChange(block.id, nv)
-        setTimeout(() => { ta.setSelectionRange(c+2,c+2); setWikilinkQuery(''); setShowWikilink(true) }, 0)
+        setTimeout(() => { ta?.setSelectionRange(cur+2, cur+2); setWikilinkQuery(''); setShowWikilink(true) }, 0)
       }) },
     { id: 'blockref', label: 'Block reference', description: 'Reference a block ((…))', icon: '🔗',
-      action: () => applySlashCommand(() => {
-        const ta = textareaRef.current; if (!ta) return
-        const c = ta.selectionStart; const v = ta.value
-        const nv = v.slice(0,c)+'(())'+v.slice(c)
+      action: () => applySlashCommand((base, cur) => {
+        const ta = textareaRef.current
+        const nv = base.slice(0, cur) + '(())' + base.slice(cur)
         setContent(nv); onChange(block.id, nv)
-        setTimeout(() => { ta.setSelectionRange(c+2,c+2); setBlockRefQuery(''); setShowBlockRef(true) }, 0)
+        setTimeout(() => { ta?.setSelectionRange(cur+2, cur+2); setBlockRefQuery(''); setShowBlockRef(true) }, 0)
       }) },
     { id: 'bold', label: 'Bold', description: '**bold**', icon: 'B',
-      action: () => applySlashCommand(() => { const ta=textareaRef.current; if(!ta) return; const c=ta.selectionStart; const v=ta.value; const nv=v.slice(0,c)+'****'+v.slice(c); setContent(nv); onChange(block.id,nv); setTimeout(()=>ta.setSelectionRange(c+2,c+2),0) }) },
+      action: () => applySlashCommand((base, cur) => { const ta=textareaRef.current; const nv=base.slice(0,cur)+'****'+base.slice(cur); setContent(nv); onChange(block.id,nv); setTimeout(()=>ta?.setSelectionRange(cur+2,cur+2),0) }) },
     { id: 'italic', label: 'Italic', description: '__italic__', icon: 'I',
-      action: () => applySlashCommand(() => { const ta=textareaRef.current; if(!ta) return; const c=ta.selectionStart; const v=ta.value; const nv=v.slice(0,c)+'____'+v.slice(c); setContent(nv); onChange(block.id,nv); setTimeout(()=>ta.setSelectionRange(c+2,c+2),0) }) },
+      action: () => applySlashCommand((base, cur) => { const ta=textareaRef.current; const nv=base.slice(0,cur)+'____'+base.slice(cur); setContent(nv); onChange(block.id,nv); setTimeout(()=>ta?.setSelectionRange(cur+2,cur+2),0) }) },
     { id: 'highlight', label: 'Highlight', description: '^^highlight^^', icon: '✏️',
-      action: () => applySlashCommand(() => { const ta=textareaRef.current; if(!ta) return; const c=ta.selectionStart; const v=ta.value; const nv=v.slice(0,c)+'^^^^'+v.slice(c); setContent(nv); onChange(block.id,nv); setTimeout(()=>ta.setSelectionRange(c+2,c+2),0) }) },
+      action: () => applySlashCommand((base, cur) => { const ta=textareaRef.current; const nv=base.slice(0,cur)+'^^^^'+base.slice(cur); setContent(nv); onChange(block.id,nv); setTimeout(()=>ta?.setSelectionRange(cur+2,cur+2),0) }) },
     { id: 'code', label: 'Inline code', description: '`code`', icon: '</>',
-      action: () => applySlashCommand(() => { const ta=textareaRef.current; if(!ta) return; const c=ta.selectionStart; const v=ta.value; const nv=v.slice(0,c)+'``'+v.slice(c); setContent(nv); onChange(block.id,nv); setTimeout(()=>ta.setSelectionRange(c+1,c+1),0) }) },
+      action: () => applySlashCommand((base, cur) => { const ta=textareaRef.current; const nv=base.slice(0,cur)+'``'+base.slice(cur); setContent(nv); onChange(block.id,nv); setTimeout(()=>ta?.setSelectionRange(cur+1,cur+1),0) }) },
     { id: 'encrypt', label: 'Encrypt block', description: 'Encrypt with AES (⌘E)', icon: '🔒',
-      action: () => applySlashCommand(() => setEncryptModal(true)) },
+      action: () => applySlashCommand((base) => { setContent(base); onChange(block.id, base); setEncryptModal(true) }) },
     { id: 'date', label: 'Date', description: 'Insert a date as [[link]]', icon: '📅',
-      action: () => applySlashCommand(() => setShowDatePicker(true)) },
+      action: () => applySlashCommand((base) => { setContent(base); onChange(block.id, base); setShowDatePicker(true) }) },
     { id: 'yesterday', label: 'Yesterday', description: 'Link to yesterday\'s note', icon: '←',
-      action: () => {
-        const ta = textareaRef.current; if (!ta) return
-        const cursor = ta.selectionStart
-        const textBefore = content.slice(0, cursor)
-        const newBefore = textBefore.replace(/(?:^|\s)\/[^/\n]*$/, m => m.startsWith('/') ? '' : m.slice(0, m.indexOf('/')))
+      action: () => applySlashCommand((base, cur) => {
+        const ta = textareaRef.current
         const d = new Date(); d.setDate(d.getDate() - 1)
         const link = `[[${dateToPageTitle(d)}]]`
-        const newContent = newBefore + link + content.slice(cursor)
+        const newContent = base.slice(0, cur) + link + base.slice(cur)
         setContent(newContent); onChange(block.id, newContent); closeAllMenus()
-        setTimeout(() => { ta.setSelectionRange(newBefore.length + link.length, newBefore.length + link.length); ta.focus() }, 0)
-      } },
+        setTimeout(() => { ta?.setSelectionRange(cur + link.length, cur + link.length); ta?.focus() }, 0)
+      }) },
     { id: 'tomorrow', label: 'Tomorrow', description: 'Link to tomorrow\'s note', icon: '→',
-      action: () => {
-        const ta = textareaRef.current; if (!ta) return
-        const cursor = ta.selectionStart
-        const textBefore = content.slice(0, cursor)
-        const newBefore = textBefore.replace(/(?:^|\s)\/[^/\n]*$/, m => m.startsWith('/') ? '' : m.slice(0, m.indexOf('/')))
+      action: () => applySlashCommand((base, cur) => {
+        const ta = textareaRef.current
         const d = new Date(); d.setDate(d.getDate() + 1)
         const link = `[[${dateToPageTitle(d)}]]`
-        const newContent = newBefore + link + content.slice(cursor)
+        const newContent = base.slice(0, cur) + link + base.slice(cur)
         setContent(newContent); onChange(block.id, newContent); closeAllMenus()
-        setTimeout(() => { ta.setSelectionRange(newBefore.length + link.length, newBefore.length + link.length); ta.focus() }, 0)
-      } },
+        setTimeout(() => { ta?.setSelectionRange(cur + link.length, cur + link.length); ta?.focus() }, 0)
+      }) },
     { id: 'h1', label: 'Heading 1', description: '# Large heading', icon: 'H1',
-      action: () => applySlashCommand(() => { const ta=textareaRef.current; const nc='# '+content.replace(/^\/\S*\s*/,'').replace(/^#+\s*/,''); setContent(nc); onChange(block.id,nc); setTimeout(()=>{ ta?.focus(); ta?.setSelectionRange(nc.length,nc.length) },0) }) },
+      action: () => applySlashCommand((base) => { const ta=textareaRef.current; const nc='# '+base.replace(/^#+\s*/,''); setContent(nc); onChange(block.id,nc); setTimeout(()=>{ ta?.focus(); ta?.setSelectionRange(nc.length,nc.length) },0) }) },
     { id: 'h2', label: 'Heading 2', description: '## Medium heading', icon: 'H2',
-      action: () => applySlashCommand(() => { const ta=textareaRef.current; const nc='## '+content.replace(/^\/\S*\s*/,'').replace(/^#+\s*/,''); setContent(nc); onChange(block.id,nc); setTimeout(()=>{ ta?.focus(); ta?.setSelectionRange(nc.length,nc.length) },0) }) },
+      action: () => applySlashCommand((base) => { const ta=textareaRef.current; const nc='## '+base.replace(/^#+\s*/,''); setContent(nc); onChange(block.id,nc); setTimeout(()=>{ ta?.focus(); ta?.setSelectionRange(nc.length,nc.length) },0) }) },
     { id: 'h3', label: 'Heading 3', description: '### Small heading', icon: 'H3',
-      action: () => applySlashCommand(() => { const ta=textareaRef.current; const nc='### '+content.replace(/^\/\S*\s*/,'').replace(/^#+\s*/,''); setContent(nc); onChange(block.id,nc); setTimeout(()=>{ ta?.focus(); ta?.setSelectionRange(nc.length,nc.length) },0) }) },
+      action: () => applySlashCommand((base) => { const ta=textareaRef.current; const nc='### '+base.replace(/^#+\s*/,''); setContent(nc); onChange(block.id,nc); setTimeout(()=>{ ta?.focus(); ta?.setSelectionRange(nc.length,nc.length) },0) }) },
   ]
 
   // Called by EncryptedBlockView when user successfully decrypts
@@ -960,6 +954,14 @@ function renderedPosToMarkdownPos(content: string, renderedPos: number): number 
       const inner = m[1].length
       if (renderedIdx + inner > renderedPos) return rawIdx + 1 + (renderedPos - renderedIdx)
       rawIdx += m[0].length; renderedIdx += inner; continue
+    }
+
+    // ((block-ref)) — rendered as the referenced block's content; we treat it as opaque
+    // and advance by the raw token length so the cursor lands just after the "))"
+    if ((m = rem.match(/^\(\(([^)]+)\)\)/))) {
+      const len = m[0].length
+      if (renderedIdx + len > renderedPos) return rawIdx + (renderedPos - renderedIdx)
+      rawIdx += len; renderedIdx += len; continue
     }
 
     // {{[[TODO]]}} / {{[[DONE]]}} — rendered as single "○"/"✓" char

@@ -1,4 +1,6 @@
 import { format, parse, isValid } from 'date-fns'
+import type { CSSProperties, RefObject } from 'react'
+import type { Block } from '../../shared/types'
 
 export function generateId(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36)
@@ -106,6 +108,49 @@ export function stripMarkdown(text: string): string {
     .replace(/\(\([^)]+\)\)/g, '')
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
     .trim()
+}
+
+// ─── Mobile popup positioning ─────────────────────────────────────────────────
+
+/** Matches the `.mobile-kb-toolbar` height in CSS */
+export const MOBILE_KEYBOARD_TOOLBAR_HEIGHT = 46
+
+/**
+ * Returns a `position: fixed` style that places a popup above the keyboard
+ * on mobile, or below the anchor element on desktop.
+ * Pass `center: true` to horizontally center on mobile (e.g. date picker).
+ */
+export function getMobilePopupStyle(
+  anchorRef: RefObject<HTMLTextAreaElement | null>,
+  center = false,
+): CSSProperties {
+  const isMobile = window.innerWidth <= 768
+  const vv = window.visualViewport
+  if (isMobile && vv) {
+    const kbHeight = Math.max(0, window.innerHeight - vv.height - vv.offsetTop)
+    return center
+      ? { position: 'fixed', bottom: kbHeight + MOBILE_KEYBOARD_TOOLBAR_HEIGHT + 4, left: '50%', transform: 'translateX(-50%)', zIndex: 500 }
+      : { position: 'fixed', bottom: kbHeight + MOBILE_KEYBOARD_TOOLBAR_HEIGHT + 4, left: 8, right: 8, zIndex: 500 }
+  }
+  const rect = anchorRef.current?.getBoundingClientRect()
+  return rect
+    ? { position: 'fixed', top: rect.bottom + 4, left: rect.left, zIndex: 500 }
+    : { position: 'fixed', top: 0, left: 0, zIndex: 500 }
+}
+
+// ─── Block search utilities ───────────────────────────────────────────────────
+
+export function findBlocksWithLink(blocks: Block[], titleLower: string, idLower: string): Block[] {
+  const results: Block[] = []
+  function traverse(block: Block) {
+    const c = block.content.toLowerCase()
+    if (c.includes(`[[${titleLower}]]`) || c.includes(`[[${idLower}]]`)) {
+      results.push(block)
+    }
+    block.children.forEach(traverse)
+  }
+  blocks.forEach(traverse)
+  return results
 }
 
 // Get all page IDs that a page links to

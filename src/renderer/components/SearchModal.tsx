@@ -143,7 +143,10 @@ export function SearchModal({ pages, onClose, onNavigate }: Props) {
               <div className="result-arrow">→</div>
             </button>
           ))}
-          {showCreate && (
+        </div>
+
+        {showCreate && (
+          <div className="search-create-bar">
             <button
               className={`search-result search-create ${selected === createIndex ? 'selected' : ''}`}
               onClick={handleCreatePage}
@@ -160,8 +163,8 @@ export function SearchModal({ pages, onClose, onNavigate }: Props) {
               </div>
               <div className="result-arrow">→</div>
             </button>
-          )}
-        </div>
+          </div>
+        )}
 
         <div className="search-footer">
           <span><kbd>↑↓</kbd> Navigate</span>

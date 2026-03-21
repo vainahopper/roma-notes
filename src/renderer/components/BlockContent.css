@@ -95,8 +95,32 @@
   font-size: 0.85em;
 }
 
+.block-ref-line {
+  display: inline;
+}
+
 .block-ref-content {
   /* content shown inline */
+}
+
+.block-ref-has-children {
+  display: inline-block;
+  vertical-align: top;
+}
+
+.block-ref-children {
+  display: block;
+  margin-top: 3px;
+  padding-left: 14px;
+  border-left: 2px solid rgba(129, 140, 248, 0.35);
+}
+
+.block-ref-child {
+  display: block;
+  font-size: 0.9em;
+  color: var(--text-secondary);
+  padding: 1px 0;
+  line-height: 1.5;
 }
 
 /* Inline todo */

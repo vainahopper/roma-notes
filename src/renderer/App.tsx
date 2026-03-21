@@ -24,7 +24,7 @@ function findBlockPath(id: string, blocks: Block[], path: ZoomFrame[] = []): Zoo
   for (const b of blocks) {
     const next: ZoomFrame[] = [...path, { blockId: b.id, blockContent: b.content }]
     if (b.id === id) return next
-    const found = findBlockPath(id, b.children, next)
+    const found = findBlockPath(id, b.children ?? [], next)
     if (found) return found
   }
   return null
@@ -53,9 +53,7 @@ export default function App() {
   const [scrollToBlockId, setScrollToBlockId] = useState<string | null>(null)
   const [starredOrder, setStarredOrder] = useState<string[]>([])
   const [blockZoom, setBlockZoom] = useState<ZoomFrame[] | null>(null)
-  const [syncStatus, setSyncStatus] = useState<string | null>(
-    typeof window !== 'undefined' && (window as any).Capacitor ? 'iCloud: connecting…' : null
-  )
+  const [syncStatus, setSyncStatus] = useState<string | null>(null)
 
   // Track last known date to detect day changes on focus
   const lastKnownDateRef = useRef(todayPageId())
@@ -132,7 +130,7 @@ export default function App() {
 
   useEffect(() => {
     if (store.loaded) buildSearchIndex(Array.from(store.pages.values()))
-  }, [store.pages, store.loaded])
+  }, [store.pagesVersion, store.loaded])
 
   // Apply theme + listen for system changes
   useEffect(() => {
@@ -192,16 +190,14 @@ export default function App() {
         clearTimer = setTimeout(() => setSyncStatus(null), ms)
       }
 
-      // Startup pull: always show feedback so user sees iCloud is active
-      setSyncStatus('iCloud: syncing…')
+      // Startup pull: silent unless something actually changed or failed
       platform.syncPull().then(result => {
         if (result.merged > 0) {
           forceReloadPages()
           setSyncStatus(`iCloud: ${result.merged} updated`)
           clearAfter(3000)
         } else {
-          setSyncStatus('iCloud: up to date')
-          clearAfter(2000)
+          setSyncStatus(null)
         }
       }).catch(() => {
         setSyncStatus('iCloud: unavailable')
@@ -236,7 +232,7 @@ export default function App() {
             setSyncStatus('iCloud: plugin not found!')
             return false
           }
-          setSyncStatus('iCloud: checking account…')
+          // Diagnose silently — only surface errors to the user
           const diag = await Promise.race([
             plugin.diagnose(),
             new Promise<any>((_, rej) => setTimeout(() => rej(new Error('timeout')), 15000))
@@ -250,7 +246,6 @@ export default function App() {
             setSyncStatus('iCloud: container unavailable — check iCloud Drive')
             return false
           }
-          setSyncStatus('iCloud: connected, starting sync…')
           return true
         } catch (e: any) {
           console.error('[Roma] diagnose error:', e)
@@ -264,9 +259,6 @@ export default function App() {
         pullInProgress = true
         try {
           console.log('[Roma] pullSync start')
-          setSyncStatus(totalSynced > 0
-            ? `iCloud: syncing… (${totalSynced} pages so far)`
-            : 'iCloud: syncing…')
           const result = await platform.syncPull()
           if (cancelled) return
           console.log('[Roma] pullSync: merged=' + result.merged +
@@ -286,8 +278,14 @@ export default function App() {
           if (result.error) {
             setSyncStatus(`iCloud: ${result.error}`)
           } else if (pendingPlaceholders > 0) {
-            setSyncStatus(`iCloud: ${totalSynced} synced, ${pendingPlaceholders} downloading…`)
+            // Still downloading files — show progress
+            setSyncStatus(`iCloud: ${pendingPlaceholders} downloading…`)
+          } else if (result.merged > 0) {
+            // New pages arrived — show briefly then clear
+            setSyncStatus(`iCloud: ${result.merged} updated`)
+            setTimeout(() => setSyncStatus(null), 3000)
           } else {
+            // Nothing changed — stay silent
             setSyncStatus(null)
           }
         } finally {
@@ -608,6 +606,7 @@ export default function App() {
           {isDailyView ? (
             <DailyNotesView
               allPages={store.pages}
+              pagesVersion={store.pagesVersion}
               onNavigate={handleNavigateToContent}
               onOpenSidebar={handleOpenSidebar}
               onZoomToBlock={handleZoomToBlock}

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import type { Page } from '../../shared/types'
 import { searchPages } from '../utils/search'
+import { getMobilePopupStyle } from '../utils/helpers'
 import './WikilinkAutocomplete.css'
 
 interface Props {
@@ -87,13 +88,4 @@ export function WikilinkAutocomplete({ query, allPages, anchorRef, onSelect, onC
   )
 }
 
-function getDropdownStyle(anchorRef: React.RefObject<HTMLTextAreaElement | null>): React.CSSProperties {
-  if (!anchorRef.current) return { top: 0, left: 0 }
-  const rect = anchorRef.current.getBoundingClientRect()
-  return {
-    position: 'fixed',
-    top: rect.bottom + 4,
-    left: rect.left,
-    zIndex: 500,
-  }
-}
+const getDropdownStyle = getMobilePopupStyle
