@@ -662,14 +662,12 @@ export function BlockItem({
         </div>
 
         <div className="block-bullet-area">
-          {/* Drag handle — visible only when block is selected + hovered (CSS controls visibility) */}
-          {hasBlockSelection && (
-            <span
-              className="block-drag-handle"
-              onMouseDown={(e) => onDragHandleMouseDown?.(e, block.id)}
-              title="Drag to move"
-            >⠿</span>
-          )}
+          {/* Drag handle — always rendered, CSS shows it only when block is selected + hovered */}
+          <span
+            className="block-drag-handle"
+            onMouseDown={(e) => onDragHandleMouseDown?.(e, block.id)}
+            title="Drag to move"
+          >⠿</span>
           {isTodo ? (
             <span className="block-bullet">
               <span className="block-bullet-dot" />
