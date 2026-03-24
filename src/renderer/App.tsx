@@ -432,6 +432,14 @@ export default function App() {
       setMainView(actualPageId)
     }
     if (!keepZoom) setBlockZoom(null)
+
+    // Track visit history in localStorage for search "Recent" ordering
+    try {
+      const key = 'roma-recent-pages'
+      const prev: string[] = JSON.parse(localStorage.getItem(key) ?? '[]')
+      const next = [actualPageId, ...prev.filter(id => id !== actualPageId)].slice(0, 20)
+      localStorage.setItem(key, JSON.stringify(next))
+    } catch {}
   }, [store.pages])
 
   /** Navigate to a specific block within a page, opening it with breadcrumbs. */

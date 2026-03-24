@@ -81,6 +81,7 @@ function parseContent(
 
 function tokenize(text: string): Token[] {
   const tokens: Token[] = []
+
   let remaining = text
 
   // Attribute syntax at start: "Key:: value"
@@ -367,13 +368,30 @@ function renderToken(
         </span>
       )
 
-    case 'attribute':
+    case 'attribute': {
+      const attrPageId = titleToId(token.key)
+      const attrExists = allPages.has(attrPageId) || allPages.has(token.key.toLowerCase())
       return (
         <span key={key} className="attribute">
-          <span className="attr-key">{token.key}::</span>
-          <span className="attr-value"> {token.value}</span>
+          <a
+            className={`attr-key wikilink ${attrExists ? 'exists' : 'new'}`}
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              if (e.shiftKey) {
+                onOpenSidebar(attrPageId)
+              } else {
+                onNavigate(attrPageId, token.key)
+              }
+            }}
+            title={`Navigate to "${token.key}"`}
+          >
+            {token.key}:
+          </a>
+          <span className="attr-value"> {parseContent(token.value, allPages, onNavigate, onOpenSidebar, onNavigateToBlock, visitedBlockIds)}</span>
         </span>
       )
+    }
 
     case 'heading': {
       const Tag = `h${Math.min(token.level, 6)}` as keyof JSX.IntrinsicElements

@@ -4,6 +4,16 @@ import { BlockEditor } from './BlockEditor'
 import { LinkedReferences } from './LinkedReferences'
 import { savePage, getOrCreateDailyPage, createNewPage } from '../stores/useStore'
 import { generateId, dateToPageId, dateToPageTitle, parseDatePage, findBlocksWithLink } from '../utils/helpers'
+
+// Sort backlink pages: daily notes by actual date, others by updatedAt. Newest first.
+function sortByPageDate(a: { page: Page }, b: { page: Page }): number {
+  const da = parseDatePage(a.page.id)
+  const db = parseDatePage(b.page.id)
+  if (da && db) return db.getTime() - da.getTime()
+  if (da) return -1
+  if (db) return 1
+  return new Date(b.page.updatedAt).getTime() - new Date(a.page.updatedAt).getTime()
+}
 import { subDays, format } from 'date-fns'
 import './DailyNotesView.css'
 
@@ -225,7 +235,7 @@ function DayEntry({ page, allPages, pagesVersion, onNavigate, onOpenSidebar, onZ
       const matching = findBlocksWithLink(p.blocks, pageTitleLower, pageIdLower)
       if (matching.length > 0) results.push({ page: p, blocks: matching })
     }
-    return results.sort((a, b) => new Date(b.page.updatedAt).getTime() - new Date(a.page.updatedAt).getTime())
+    return results.sort(sortByPageDate)
   }, [page.id, page.title, allPages, pagesVersion])
 
   const handleToggleTodo = useCallback((pageId: string, blockId: string) => {
@@ -245,6 +255,30 @@ function DayEntry({ page, allPages, pagesVersion, onNavigate, onOpenSidebar, onZ
       })
     }
     savePage({ ...target, blocks: toggle(target.blocks) })
+  }, [allPages])
+
+  const handleToggleTodoMarker = useCallback((pageId: string, blockId: string) => {
+    const target = allPages.get(pageId)
+    if (!target) return
+    function updateBlock(bs: Block[]): Block[] {
+      return bs.map(b => {
+        if (b.id === blockId) {
+          const isTodo = b.checked !== null && b.checked !== undefined
+          const hasContentTodo = /\{\{\[\[TODO\]\]\}\}|\{\{\[\[DONE\]\]\}\}/i.test(b.content)
+          if (isTodo || hasContentTodo) {
+            const newContent = b.content
+              .replace(/\{\{\[\[TODO\]\]\}\}|{{TODO}}/gi, '')
+              .replace(/\{\{\[\[DONE\]\]\}\}|{{DONE}}/gi, '')
+              .trim()
+            return { ...b, checked: null, content: newContent }
+          } else {
+            return { ...b, checked: false }
+          }
+        }
+        return { ...b, children: updateBlock(b.children) }
+      })
+    }
+    savePage({ ...target, blocks: updateBlock(target.blocks) })
   }, [allPages])
 
   const handleEditBlock = useCallback((pageId: string, blockId: string, content: string) => {
@@ -295,6 +329,7 @@ function DayEntry({ page, allPages, pagesVersion, onNavigate, onOpenSidebar, onZ
             onNavigate={onNavigate}
             onNavigateToBlock={onZoomToBlock}
             onToggleBlock={handleToggleTodo}
+            onToggleTodoMarker={handleToggleTodoMarker}
             onEditBlock={handleEditBlock}
             title="Linked References"
           />

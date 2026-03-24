@@ -28,6 +28,7 @@ interface Props {
   onOpenSidebar: (id: string) => void
   onDelete?: (id: string) => void
   onPasteBlocks?: (id: string, contentBefore: string, contentAfter: string, pastedText: string) => void
+  onInsertTemplateBlocks?: (blockId: string, blocks: Block[]) => void
   onZoom?: (id: string, content: string) => void
   onNavigateToBlock?: (pageId: string, pageTitle: string, blockId: string) => void
   hasBlockSelection?: boolean
@@ -45,7 +46,7 @@ function buildIndentedText(block: Block, depth: number): string {
 export function BlockItem({
   block, depth, allPages, requestFocusId, onConsumeFocus,
   onChange, onToggleCheck, onToggleTodo, onEnter, onBackspace, onTab,
-  onArrowUp, onArrowDown, onNavigate, onOpenSidebar, onDelete, onPasteBlocks, onZoom, onNavigateToBlock,
+  onArrowUp, onArrowDown, onNavigate, onOpenSidebar, onDelete, onPasteBlocks, onInsertTemplateBlocks, onZoom, onNavigateToBlock,
   hasBlockSelection, onDragHandleMouseDown,
 }: Props) {
   const [editing, setEditing] = useState(false)
@@ -57,6 +58,8 @@ export function BlockItem({
   const [blockRefQuery, setBlockRefQuery] = useState('')
   const [showSlash, setShowSlash] = useState(false)
   const [slashQuery, setSlashQuery] = useState('')
+  const [showTemplate, setShowTemplate] = useState(false)
+  const [templateQuery, setTemplateQuery] = useState('')
   const [showEncryptModal, setShowEncryptModal] = useState(false)
   const [showDatePicker, setShowDatePicker] = useState(false)
   // When unlocked: stores the password used, so we can re-encrypt on blur/navigate
@@ -80,6 +83,7 @@ export function BlockItem({
     setShowWikilink(false)
     setShowBlockRef(false)
     setShowSlash(false)
+    setShowTemplate(false)
   }, [])
 
   useEffect(() => {
@@ -158,7 +162,15 @@ export function BlockItem({
     const slashMatch = textBefore.match(/(?:^|\s)\/([^/\s\n]*)$/)
     if (slashMatch) {
       setSlashQuery(slashMatch[1])
-      setShowSlash(true); setShowWikilink(false); setShowBlockRef(false)
+      setShowSlash(true); setShowWikilink(false); setShowBlockRef(false); setShowTemplate(false)
+      return
+    }
+
+    // ;; template trigger
+    const templateMatch = textBefore.match(/;;(.*)$/)
+    if (templateMatch) {
+      setTemplateQuery(templateMatch[1].trim())
+      setShowTemplate(true); setShowWikilink(false); setShowBlockRef(false); setShowSlash(false)
       return
     }
 
@@ -215,7 +227,7 @@ export function BlockItem({
   }, [block, content])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    const anyMenuOpen = showWikilink || showBlockRef || showSlash
+    const anyMenuOpen = showWikilink || showBlockRef || showSlash || showTemplate
     if (anyMenuOpen && ['ArrowUp', 'ArrowDown', 'Enter', 'Tab'].includes(e.key)) { e.preventDefault(); return }
     if (anyMenuOpen && e.key === 'Escape') { e.preventDefault(); closeAllMenus(); return }
 
@@ -536,6 +548,59 @@ export function BlockItem({
       action: () => applySlashCommand((base) => { const ta=textareaRef.current; const nc='### '+base.replace(/^#+\s*/,''); setContent(nc); onChange(block.id,nc); setTimeout(()=>{ ta?.focus(); ta?.setSelectionRange(nc.length,nc.length) },0) }) },
   ]
 
+  // ── ;; Template system ─────────────────────────────────────────────────────
+  const TEMPLATE_PAGE_TITLES = ['roma/templates', 'roam/templates']
+
+  const templatePage = useMemo(() => {
+    for (const title of TEMPLATE_PAGE_TITLES) {
+      for (const [, p] of allPages) {
+        if (p.title.toLowerCase() === title.toLowerCase()) return p
+      }
+    }
+    return null
+  }, [allPages])
+
+  const templateCommands: SlashCommand[] = useMemo(() => {
+    if (!templatePage) return []
+    return templatePage.blocks
+      .filter(b => b.content.trim() && b.children.length > 0)
+      .map(b => ({
+        id: b.id,
+        label: b.content.trim(),
+        description: `${b.children.length} block${b.children.length > 1 ? 's' : ''}`,
+        icon: '📋',
+        action: () => {
+          const ta = textareaRef.current
+          const cursor = ta?.selectionStart ?? content.length
+          const textBefore = content.slice(0, cursor)
+          const textAfter = content.slice(cursor)
+          // Strip ;; trigger, keep text before it
+          const prefix = textBefore.replace(/;;[^;]*$/, '').trimEnd()
+          // Block content = prefix (if any) + template name
+          const templateName = b.content.trim()
+          const newContent = prefix ? prefix + ' ' + templateName : templateName
+          setContent(newContent)
+          onChange(block.id, newContent + textAfter)
+          closeAllMenus()
+          // Clone template blocks with fresh IDs and insert as children
+          if (onInsertTemplateBlocks) {
+            const now = new Date().toISOString()
+            function cloneBlocks(blocks: Block[]): Block[] {
+              return blocks.map(bl => ({
+                ...bl,
+                id: Math.random().toString(36).slice(2, 10),
+                children: cloneBlocks(bl.children),
+                createdAt: now,
+                updatedAt: now,
+              }))
+            }
+            onInsertTemplateBlocks(block.id, cloneBlocks(b.children))
+          }
+          setTimeout(() => { ta?.focus(); ta?.setSelectionRange(newContent.length, newContent.length) }, 0)
+        },
+      }))
+  }, [templatePage, block.id, content, onChange, closeAllMenus, onInsertTemplateBlocks])
+
   // Called by EncryptedBlockView when user successfully decrypts
   const handleUnlock = useCallback((plaintext: string, password: string) => {
     setUnlockPassword(password)
@@ -765,6 +830,10 @@ export function BlockItem({
         <SlashMenu query={slashQuery} commands={slashCommands} anchorRef={textareaRef} onClose={() => setShowSlash(false)} />
       )}
 
+      {showTemplate && editing && templateCommands.length > 0 && (
+        <SlashMenu query={templateQuery} commands={templateCommands} anchorRef={textareaRef} onClose={() => setShowTemplate(false)} />
+      )}
+
       {showEncryptModal && (
         <EncryptModal onEncrypt={handleEncrypt} onClose={() => setEncryptModal(false)} />
       )}
@@ -781,7 +850,7 @@ export function BlockItem({
               onChange={onChange} onToggleCheck={onToggleCheck} onToggleTodo={onToggleTodo} onEnter={onEnter}
               onBackspace={onBackspace} onTab={onTab} onArrowUp={onArrowUp} onArrowDown={onArrowDown}
               onNavigate={onNavigate} onOpenSidebar={onOpenSidebar} onDelete={onDelete}
-              onPasteBlocks={onPasteBlocks} onZoom={onZoom} onNavigateToBlock={onNavigateToBlock}
+              onPasteBlocks={onPasteBlocks} onInsertTemplateBlocks={onInsertTemplateBlocks} onZoom={onZoom} onNavigateToBlock={onNavigateToBlock}
               hasBlockSelection={hasBlockSelection}
               onDragHandleMouseDown={onDragHandleMouseDown} />
           ))}
@@ -957,6 +1026,28 @@ function renderedPosToMarkdownPos(content: string, renderedPos: number): number 
   const headingMatch = content.match(/^(#{1,6})\s+/)
   if (headingMatch) {
     return Math.min(headingMatch[0].length + Math.max(0, renderedPos), content.length)
+  }
+
+  // Attribute: "Key:: value" → rendered as "{key}: {value}" (one colon visible, two in raw)
+  // The raw has an extra ":" so positions after the key need +1 adjustment.
+  const attrMatch = content.match(/^([^:\n]+)::\s*(.*)$/)
+  if (attrMatch) {
+    const rawKey = attrMatch[1]           // everything before "::" (e.g. "Key")
+    const rawVal = attrMatch[2]           // everything after ":: " (e.g. "value")
+    const key = rawKey.trim()
+    const leadingInKey = rawKey.indexOf(key)  // leading spaces in key (usually 0)
+    const rawValStart = content.length - rawVal.length  // index of value start in raw
+    // rendered layout: [0..key.length-1] = key text, [key.length] = ":", [key.length+1] = " " (from JSX), [key.length+2..] = value
+    if (renderedPos <= key.length) {
+      return Math.min(leadingInKey + renderedPos, rawKey.length)
+    } else if (renderedPos <= key.length + 1) {
+      // After the rendered ":" → place after both raw "::" colons
+      return Math.min(rawKey.length + 2, content.length)
+    } else {
+      // In the value
+      const valueOffset = renderedPos - (key.length + 2)
+      return Math.min(rawValStart + valueOffset, content.length)
+    }
   }
 
   while (rawIdx < content.length) {

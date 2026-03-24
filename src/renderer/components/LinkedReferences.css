@@ -129,7 +129,7 @@
   display: flex;
   align-items: flex-start;
   gap: 0;
-  padding: 2px 4px;
+  padding: 1px 4px;
   border-radius: var(--radius-sm);
   cursor: default;
   transition: background var(--transition);
@@ -145,7 +145,7 @@
   justify-content: center;
   flex-shrink: 0;
   width: 14px;
-  height: 24px;
+  min-height: 22px;
 }
 
 .backlink-child-toggle {
@@ -175,7 +175,7 @@
   justify-content: center;
   flex-shrink: 0;
   width: 22px;
-  height: 24px;
+  min-height: 22px;
   gap: 2px;
 }
 
@@ -248,27 +248,34 @@
   opacity: 0.55;
 }
 
-/* Inline edit textarea */
+/* Inline edit textarea — seamlessly replaces rendered content */
 .backlink-edit-textarea {
   flex: 1;
   min-width: 0;
   width: 100%;
   font-size: 14px;
   line-height: 1.6;
-  color: var(--text-primary);
-  background: var(--bg-active);
-  border: 1px solid var(--accent);
-  border-radius: var(--radius-sm);
-  padding: 2px 4px;
+  font-family: inherit;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
   resize: none;
   outline: none;
   overflow: hidden;
   min-height: 24px;
+  caret-color: var(--accent);
+  word-break: break-word;
+}
+.backlink-edit-textarea:focus {
+  color: var(--text-primary);
 }
 .backlink-edit-textarea.done-text {
   text-decoration: line-through;
-  opacity: 0.6;
+  opacity: 0.55;
 }
+
 
 /* Children indentation */
 .backlink-children {

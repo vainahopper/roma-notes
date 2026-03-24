@@ -14,12 +14,13 @@ interface Props {
   onNavigate: (id: string, title?: string) => void
   onNavigateToBlock?: (pageId: string, pageTitle: string, blockId: string) => void
   onToggleBlock?: (pageId: string, blockId: string) => void
+  onToggleTodoMarker?: (pageId: string, blockId: string) => void
   onEditBlock?: (pageId: string, blockId: string, content: string) => void
   title?: string
   onLinkAll?: () => void
 }
 
-export function LinkedReferences({ backlinks, allPages, onNavigate, onNavigateToBlock, onToggleBlock, onEditBlock, title = 'Linked References', onLinkAll }: Props) {
+export function LinkedReferences({ backlinks, allPages, onNavigate, onNavigateToBlock, onToggleBlock, onToggleTodoMarker, onEditBlock, title = 'Linked References', onLinkAll }: Props) {
   const [open, setOpen] = useState(true)
 
   return (
@@ -53,6 +54,7 @@ export function LinkedReferences({ backlinks, allPages, onNavigate, onNavigateTo
               onNavigate={onNavigate}
               onNavigateToBlock={onNavigateToBlock}
               onToggleBlock={onToggleBlock}
+              onToggleTodoMarker={onToggleTodoMarker}
               onEditBlock={onEditBlock}
             />
           ))}
@@ -63,7 +65,7 @@ export function LinkedReferences({ backlinks, allPages, onNavigate, onNavigateTo
 }
 
 function BacklinkItem({
-  page, blocks, allPages, onNavigate, onNavigateToBlock, onToggleBlock, onEditBlock,
+  page, blocks, allPages, onNavigate, onNavigateToBlock, onToggleBlock, onToggleTodoMarker, onEditBlock,
 }: {
   page: Page
   blocks: Block[]
@@ -71,6 +73,7 @@ function BacklinkItem({
   onNavigate: (id: string, title?: string) => void
   onNavigateToBlock?: (pageId: string, pageTitle: string, blockId: string) => void
   onToggleBlock?: (pageId: string, blockId: string) => void
+  onToggleTodoMarker?: (pageId: string, blockId: string) => void
   onEditBlock?: (pageId: string, blockId: string, content: string) => void
 }) {
   const [open, setOpen] = useState(true)
@@ -107,6 +110,7 @@ function BacklinkItem({
               onNavigate={onNavigate}
               onNavigateToBlock={onNavigateToBlock}
               onToggleBlock={onToggleBlock}
+              onToggleTodoMarker={onToggleTodoMarker}
               onEditBlock={onEditBlock}
             />
           ))}
@@ -120,7 +124,7 @@ const TODO_RE = /\{\{\[\[TODO\]\]\}\}/i
 const DONE_RE = /\{\{\[\[DONE\]\]\}\}/i
 
 function BacklinkBlock({
-  block, page, allPages, onNavigate, onNavigateToBlock, onToggleBlock, onEditBlock,
+  block, page, allPages, onNavigate, onNavigateToBlock, onToggleBlock, onToggleTodoMarker, onEditBlock,
 }: {
   block: Block
   page: Page
@@ -128,6 +132,7 @@ function BacklinkBlock({
   onNavigate: (id: string, title?: string) => void
   onNavigateToBlock?: (pageId: string, pageTitle: string, blockId: string) => void
   onToggleBlock?: (pageId: string, blockId: string) => void
+  onToggleTodoMarker?: (pageId: string, blockId: string) => void
   onEditBlock?: (pageId: string, blockId: string, content: string) => void
 }) {
   const [expanded, setExpanded] = useState(false)
@@ -195,6 +200,12 @@ function BacklinkBlock({
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault()
+      setEditing(false)
+      onToggleTodoMarker?.(page.id, block.id)
+      return
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       textareaRef.current?.blur()
@@ -300,6 +311,7 @@ function BacklinkBlock({
               onNavigate={onNavigate}
               onNavigateToBlock={onNavigateToBlock}
               onToggleBlock={onToggleBlock}
+              onToggleTodoMarker={onToggleTodoMarker}
               onEditBlock={onEditBlock}
             />
           ))}

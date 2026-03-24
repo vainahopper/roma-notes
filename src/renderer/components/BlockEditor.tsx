@@ -850,6 +850,20 @@ export function BlockEditor({ blocks, onChange, allPages, onNavigate, onOpenSide
     onChange(newBlocks)
   }, [blocks, onChange, flushAndPushHistory])
 
+  const handleInsertTemplateBlocks = useCallback((blockId: string, templateBlocks: Block[]) => {
+    flushAndPushHistory(blocks)
+    const newBlocks = updateBlock(blockId, b => ({
+      ...b,
+      children: [...templateBlocks, ...b.children],
+    }), blocks)
+    // Focus the first inserted template block (cursor at end of line)
+    if (templateBlocks.length > 0) {
+      focusIdRef.current = templateBlocks[0].id
+      setFocusTick(t => t + 1)
+    }
+    onChange(newBlocks)
+  }, [blocks, onChange, flushAndPushHistory])
+
   // ─── Native copy: block selection or DOM selection → indented plain text ────────
   useEffect(() => {
     const handler = (e: ClipboardEvent) => {
@@ -1353,6 +1367,7 @@ export function BlockEditor({ blocks, onChange, allPages, onNavigate, onOpenSide
           onNavigate={onNavigate}
           onOpenSidebar={onOpenSidebar}
           onPasteBlocks={handlePasteBlocks}
+          onInsertTemplateBlocks={handleInsertTemplateBlocks}
           onZoom={onZoom}
           onNavigateToBlock={onNavigateToBlock}
           hasBlockSelection={selectedBlockIdsRef.current.size > 0}

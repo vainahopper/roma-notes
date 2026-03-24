@@ -3,8 +3,19 @@ import type { Page, Block, ZoomFrame } from '../../shared/types'
 import { BlockEditor } from './BlockEditor'
 import { BlockContent } from './BlockContent'
 import { LinkedReferences } from './LinkedReferences'
-import { savePage, deletePage, createNewPage } from '../stores/useStore'
-import { isDatePage, findBlocksWithLink } from '../utils/helpers'
+import { savePage, deletePage, createNewPage, useStore } from '../stores/useStore'
+import { isDatePage, parseDatePage, findBlocksWithLink, extractAttributes } from '../utils/helpers'
+
+// Sort pages so daily notes appear in chronological order (by their actual date),
+// and regular pages sort by createdAt.  Newest first.
+function sortByPageDate(a: { page: Page }, b: { page: Page }): number {
+  const da = parseDatePage(a.page.id)
+  const db = parseDatePage(b.page.id)
+  if (da && db) return db.getTime() - da.getTime()
+  if (da) return -1  // daily notes before regular pages
+  if (db) return 1
+  return new Date(b.page.createdAt).getTime() - new Date(a.page.createdAt).getTime()
+}
 import './PageView.css'
 
 interface Props {
@@ -23,8 +34,10 @@ interface Props {
 
 // Pages whose title triggers special linked-refs treatment
 const TODO_PAGE_TITLES = ['todo', 'todos', 'tasks']
+const DONE_PAGE_TITLES = ['done']
 
 export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDeleted, isSidebar = false, scrollToBlockId, onClearScrollTarget, onNavigateToBlock, onToggleStar, initialZoom }: Props) {
+  const { pagesVersion } = useStore()
   const [blocks, setBlocks] = useState<Block[]>(page.blocks)
   const [title, setTitle] = useState(page.title)
   const [editingTitle, setEditingTitle] = useState(false)
@@ -50,6 +63,7 @@ export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDele
 
   const isDaily = page.isDaily || isDatePage(page.title)
   const isTodoPage = TODO_PAGE_TITLES.includes(page.title.toLowerCase())
+  const isDonePage = DONE_PAGE_TITLES.includes(page.title.toLowerCase())
 
   // Live content of the currently-zoomed block (for zoom hero title)
   const currentZoomedBlock = useMemo(() => {
@@ -114,6 +128,32 @@ export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDele
     savePage({ ...targetPage, blocks: updateBlockChecked(targetPage.blocks) })
   }, [allPages])
 
+  const handleToggleTodoMarker = useCallback((pageId: string, blockId: string) => {
+    const targetPage = allPages.get(pageId)
+    if (!targetPage) return
+    function updateBlock(blocks: Block[]): Block[] {
+      return blocks.map(b => {
+        if (b.id === blockId) {
+          const isTodo = b.checked !== null && b.checked !== undefined
+          const hasContentTodo = /\{\{\[\[TODO\]\]\}\}|\{\{\[\[DONE\]\]\}\}/i.test(b.content)
+          if (isTodo || hasContentTodo) {
+            // Remove the todo marker entirely
+            const newContent = b.content
+              .replace(/\{\{\[\[TODO\]\]\}\}|{{TODO}}/gi, '')
+              .replace(/\{\{\[\[DONE\]\]\}\}|{{DONE}}/gi, '')
+              .trim()
+            return { ...b, checked: null, content: newContent }
+          } else {
+            // Add the todo marker
+            return { ...b, checked: false }
+          }
+        }
+        return { ...b, children: updateBlock(b.children) }
+      })
+    }
+    savePage({ ...targetPage, blocks: updateBlock(targetPage.blocks) })
+  }, [allPages])
+
   const handleEditBacklinkBlock = useCallback((pageId: string, blockId: string, content: string) => {
     const targetPage = allPages.get(pageId)
     if (!targetPage) return
@@ -136,9 +176,8 @@ export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDele
       const matchingBlocks = findBlocksWithLink(p.blocks, pageTitleLower, pageIdLower)
       if (matchingBlocks.length > 0) results.push({ page: p, blocks: matchingBlocks })
     }
-    // Sort most-recently-created pages first (creation date = the day for daily notes)
-    return results.sort((a, b) => new Date(b.page.createdAt).getTime() - new Date(a.page.createdAt).getTime())
-  }, [page.id, page.title, allPages])
+    return results.sort(sortByPageDate)
+  }, [page.id, page.title, allPages, pagesVersion])
 
   // Build a Set of block IDs that are already linked (for filtering unlinked)
   const linkedBlockIds = useMemo(() => {
@@ -161,9 +200,8 @@ export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDele
       )
       if (matchingBlocks.length > 0) results.push({ page: p, blocks: matchingBlocks })
     }
-    // Sort most-recently-created pages first (creation date = the day for daily notes)
-    return results.sort((a, b) => new Date(b.page.createdAt).getTime() - new Date(a.page.createdAt).getTime())
-  }, [page.id, title, allPages, linkedBlockIds])
+    return results.sort(sortByPageDate)
+  }, [page.id, title, allPages, linkedBlockIds, pagesVersion])
 
   // ── TODO page: collect all todo blocks across all pages ──────────────────────
   const todoRefs = useMemo(() => {
@@ -174,8 +212,20 @@ export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDele
       const todoBlocks = findTodoBlocks(p.blocks)
       if (todoBlocks.length > 0) results.push({ page: p, blocks: todoBlocks })
     }
-    return results.sort((a, b) => new Date(b.page.updatedAt).getTime() - new Date(a.page.updatedAt).getTime())
-  }, [isTodoPage, allPages, page.id])
+    return results.sort(sortByPageDate)
+  }, [isTodoPage, allPages, page.id, pagesVersion])
+
+  // ── DONE page: collect all done blocks across all pages ───────────────────────
+  const doneRefs = useMemo(() => {
+    if (!isDonePage) return []
+    const results: { page: Page; blocks: Block[] }[] = []
+    for (const [, p] of allPages) {
+      if (p.id === page.id) continue
+      const doneBlocks = findDoneBlocks(p.blocks)
+      if (doneBlocks.length > 0) results.push({ page: p, blocks: doneBlocks })
+    }
+    return results.sort(sortByPageDate)
+  }, [isDonePage, allPages, page.id, pagesVersion])
 
   // ── "Link All" — convert unlinked plain-text mentions to [[wikilinks]] ───────
   const handleLinkAll = useCallback(async () => {
@@ -311,8 +361,23 @@ export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDele
             onNavigate={onNavigate}
             onNavigateToBlock={onNavigateToBlock}
             onToggleBlock={handleToggleBacklinkTodo}
+            onToggleTodoMarker={handleToggleTodoMarker}
             onEditBlock={handleEditBacklinkBlock}
             title="All To-dos"
+          />
+        )}
+
+        {/* DONE page: show all done blocks */}
+        {isDonePage && doneRefs.length > 0 && !isSidebar && (
+          <LinkedReferences
+            backlinks={doneRefs}
+            allPages={allPages}
+            onNavigate={onNavigate}
+            onNavigateToBlock={onNavigateToBlock}
+            onToggleBlock={handleToggleBacklinkTodo}
+            onToggleTodoMarker={handleToggleTodoMarker}
+            onEditBlock={handleEditBacklinkBlock}
+            title="All Done"
           />
         )}
 
@@ -324,6 +389,7 @@ export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDele
             onNavigate={onNavigate}
             onNavigateToBlock={onNavigateToBlock}
             onToggleBlock={handleToggleBacklinkTodo}
+            onToggleTodoMarker={handleToggleTodoMarker}
             onEditBlock={handleEditBacklinkBlock}
             title="Linked References"
           />
@@ -337,6 +403,7 @@ export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDele
             onNavigate={onNavigate}
             onNavigateToBlock={onNavigateToBlock}
             onToggleBlock={handleToggleBacklinkTodo}
+            onToggleTodoMarker={handleToggleTodoMarker}
             onEditBlock={handleEditBacklinkBlock}
             title="Unlinked References"
             onLinkAll={handleLinkAll}
@@ -372,6 +439,10 @@ function ensureWikilinkPages(blocks: Block[], allPages: Map<string, Page>) {
       while ((m = WIKILINK_RE.exec(b.content)) !== null) {
         seen.add(m[1])
       }
+      // Also collect attribute keys ("Key:: value")
+      for (const attr of extractAttributes(b.content)) {
+        seen.add(attr)
+      }
       traverse(b.children)
     }
   }
@@ -397,8 +468,8 @@ function findBlocksWithUnlinkedMention(blocks: Block[], title: string): Block[] 
   function traverse(block: Block) {
     const contentLower = block.content.toLowerCase()
     if (contentLower.includes(titleLower)) {
-      // Strip all [[...]] wikilinks from content before checking for plain mention
-      const stripped = block.content.replace(/\[\[[^\]]*\]\]/g, '').toLowerCase()
+      // Strip all [[...]] wikilinks and #tags from content before checking for plain mention
+      const stripped = block.content.replace(/\[\[[^\]]*\]\]/g, '').replace(/#(?:\[\[[^\]]+\]\]|[A-Za-z0-9_À-ÿ-]+)/g, '').toLowerCase()
       if (stripped.includes(titleLower)) results.push(block)
     }
     block.children.forEach(traverse)
@@ -407,14 +478,28 @@ function findBlocksWithUnlinkedMention(blocks: Block[], title: string): Block[] 
   return results
 }
 
-const TODO_CONTENT_RE = /\{\{\[\[TODO\]\]\}\}|\{\{\[\[DONE\]\]\}\}/i
+const TODO_CONTENT_RE = /\{\{\[\[TODO\]\]\}\}/i
+const DONE_CONTENT_RE = /\{\{\[\[DONE\]\]\}\}/i
 
 function findTodoBlocks(blocks: Block[]): Block[] {
   const results: Block[] = []
   function traverse(block: Block) {
+    const isDone = block.checked === true || DONE_CONTENT_RE.test(block.content)
+    if (isDone) { block.children.forEach(traverse); return }
     const hasTodoProp = block.checked !== null && block.checked !== undefined
     const hasTodoContent = TODO_CONTENT_RE.test(block.content)
     if (hasTodoProp || hasTodoContent) results.push(block)
+    block.children.forEach(traverse)
+  }
+  blocks.forEach(traverse)
+  return results
+}
+
+function findDoneBlocks(blocks: Block[]): Block[] {
+  const results: Block[] = []
+  function traverse(block: Block) {
+    const isDone = block.checked === true || DONE_CONTENT_RE.test(block.content)
+    if (isDone) results.push(block)
     block.children.forEach(traverse)
   }
   blocks.forEach(traverse)

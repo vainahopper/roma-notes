@@ -136,10 +136,9 @@
 .attribute {
   display: block;
 }
-.attr-key {
-  color: var(--text-muted);
-  font-size: 0.88em;
-  font-weight: 500;
+.attr-key.wikilink {
+  font-weight: 700;
+  font-size: inherit;
 }
 .attr-value {
   color: var(--text-primary);

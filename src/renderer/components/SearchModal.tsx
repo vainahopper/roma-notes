@@ -40,17 +40,37 @@ export function SearchModal({ pages, onClose, onNavigate }: Props) {
       setResults(r)
       setSelected(0)
     } else {
-      // Show recent pages
-      const recent = Array.from(pages.values())
-        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-        .slice(0, 10)
-        .map(p => ({
-          type: 'page' as const,
-          pageId: p.id,
-          pageTitle: p.title,
-          content: p.title,
-          score: 0,
-        }))
+      // Show recently visited pages (tracked in localStorage), fallback to updatedAt
+      let recentIds: string[] = []
+      try {
+        recentIds = JSON.parse(localStorage.getItem('roma-recent-pages') ?? '[]')
+      } catch {}
+
+      let recent: SearchResult[]
+      if (recentIds.length > 0) {
+        recent = recentIds
+          .map(id => pages.get(id))
+          .filter((p): p is Page => p != null)
+          .slice(0, 10)
+          .map(p => ({
+            type: 'page' as const,
+            pageId: p.id,
+            pageTitle: p.title,
+            content: p.title,
+            score: 0,
+          }))
+      } else {
+        recent = Array.from(pages.values())
+          .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+          .slice(0, 10)
+          .map(p => ({
+            type: 'page' as const,
+            pageId: p.id,
+            pageTitle: p.title,
+            content: p.title,
+            score: 0,
+          }))
+      }
       setResults(recent)
       setSelected(0)
     }

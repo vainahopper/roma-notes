@@ -82,7 +82,7 @@ manually via **Roma Notes > Check for Updates…**.
 `npm run deploy:ios` copies `dist/` to the iCloud container. The iPhone app
 detects the new version 5 seconds after launch and applies it (reloads).
 
-## Current version: 1.7.87
+## Current version: 1.7.112
 
 ## iPhone setup (one-time)
 1. In Xcode: select your Apple Developer Team (Signing & Capabilities)

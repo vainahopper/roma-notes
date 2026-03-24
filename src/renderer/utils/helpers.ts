@@ -78,6 +78,12 @@ export function extractTags(text: string): string[] {
   })
 }
 
+// Extract attribute key from "Key:: value" syntax
+export function extractAttributes(text: string): string[] {
+  const match = text.match(/^([^:\n]+)::\s/)
+  return match ? [match[1].trim()] : []
+}
+
 // Convert page title to ID/slug for lookup
 export function titleToId(title: string): string {
   // Check if it's a date first
@@ -142,9 +148,15 @@ export function getMobilePopupStyle(
 
 export function findBlocksWithLink(blocks: Block[], titleLower: string, idLower: string): Block[] {
   const results: Block[] = []
+  // Match #tag with word boundary, and Key:: attribute syntax
+  const tagRegex = new RegExp(`(?:#\\[\\[(?:${escapeRegex(titleLower)}|${escapeRegex(idLower)})\\]\\]|#(?:${escapeRegex(titleLower)}|${escapeRegex(idLower)})(?=[^A-Za-z0-9_À-ÿ-]|$))`)
+  const attrRegex = new RegExp(`^(?:${escapeRegex(titleLower)}|${escapeRegex(idLower)})::`, 'm')
   function traverse(block: Block) {
     const c = block.content.toLowerCase()
-    if (c.includes(`[[${titleLower}]]`) || c.includes(`[[${idLower}]]`)) {
+    if (
+      c.includes(`[[${titleLower}]]`) || c.includes(`[[${idLower}]]`) ||
+      tagRegex.test(c) || attrRegex.test(c)
+    ) {
       results.push(block)
     }
     block.children.forEach(traverse)
@@ -153,12 +165,17 @@ export function findBlocksWithLink(blocks: Block[], titleLower: string, idLower:
   return results
 }
 
-// Get all page IDs that a page links to
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+// Get all page IDs that a page links to (wikilinks + tags)
 export function getLinksFromBlocks(blocks: import('../../shared/types').Block[]): string[] {
   const links = new Set<string>()
   function traverse(block: import('../../shared/types').Block) {
-    const found = extractWikilinks(block.content)
-    found.forEach(l => links.add(l.toLowerCase().trim()))
+    extractWikilinks(block.content).forEach(l => links.add(l.toLowerCase().trim()))
+    extractTags(block.content).forEach(t => links.add(t.toLowerCase().trim()))
+    extractAttributes(block.content).forEach(a => links.add(a.toLowerCase().trim()))
     block.children.forEach(traverse)
   }
   blocks.forEach(traverse)
