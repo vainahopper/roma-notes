@@ -574,9 +574,10 @@ export function BlockItem({
           const cursor = ta?.selectionStart ?? content.length
           const textBefore = content.slice(0, cursor)
           const textAfter = content.slice(cursor)
-          // Strip ;; trigger and template query, keep only text before ;;
+          // Replace ;; trigger with the template name (like Roam)
           const prefix = textBefore.replace(/;;[^;]*$/, '').trimEnd()
-          const newContent = prefix + textAfter.trimStart()
+          const templateName = b.content.trim()
+          const newContent = (prefix ? prefix + ' ' : '') + templateName + textAfter.trimStart()
           setContent(newContent)
           onChange(block.id, newContent)
           closeAllMenus()
