@@ -574,13 +574,11 @@ export function BlockItem({
           const cursor = ta?.selectionStart ?? content.length
           const textBefore = content.slice(0, cursor)
           const textAfter = content.slice(cursor)
-          // Strip ;; trigger, keep text before it
+          // Strip ;; trigger and template query, keep only text before ;;
           const prefix = textBefore.replace(/;;[^;]*$/, '').trimEnd()
-          // Block content = prefix (if any) + template name
-          const templateName = b.content.trim()
-          const newContent = prefix ? prefix + ' ' + templateName : templateName
+          const newContent = prefix + textAfter.trimStart()
           setContent(newContent)
-          onChange(block.id, newContent + textAfter)
+          onChange(block.id, newContent)
           closeAllMenus()
           // Clone template blocks with fresh IDs and insert as children
           if (onInsertTemplateBlocks) {
