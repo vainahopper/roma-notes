@@ -125,6 +125,66 @@ function _findParentBlockId(id: string, list: Block[]): string | null {
   return null
 }
 
+/**
+ * Insert blocks at a target position and depth in the tree.
+ * - position 'before'/'after' the reference block
+ * - targetDepth determines nesting: same depth = sibling, deeper = child of ref or ancestor
+ */
+function _insertBlocksAtTarget(
+  tree: Block[],
+  refBlockId: string,
+  position: 'before' | 'after',
+  targetDepth: number,
+  blocksToInsert: Block[]
+): Block[] {
+  const depthMap = _buildDepthMap(tree, 0)
+  const refDepth = depthMap.get(refBlockId) ?? 0
+
+  // Case 1: Insert as child of the reference block (targetDepth > refDepth, position=after)
+  if (targetDepth > refDepth && position === 'after') {
+    return tree.map(function addAsChild(b): Block {
+      if (b.id === refBlockId) {
+        return { ...b, children: [...b.children, ...blocksToInsert] }
+      }
+      return { ...b, children: b.children.map(addAsChild) }
+    })
+  }
+
+  // Case 2: Same depth or shallower — insert as sibling of the ref block (or an ancestor)
+  let insertRefId = refBlockId
+  let currentDepth = refDepth
+  while (currentDepth > targetDepth) {
+    const parentId = _findParentBlockId(insertRefId, tree)
+    if (!parentId) break
+    insertRefId = parentId
+    currentDepth--
+  }
+
+  if (position === 'before') {
+    let result = tree
+    for (let i = blocksToInsert.length - 1; i >= 0; i--) {
+      result = _insertBefore(insertRefId, blocksToInsert[i], result)
+    }
+    return result
+  } else {
+    let result = tree
+    for (let i = blocksToInsert.length - 1; i >= 0; i--) {
+      result = _insertAfter(insertRefId, blocksToInsert[i], result)
+    }
+    return result
+  }
+}
+
+/** Insert a block before the given ID (mirror of _insertAfter). */
+function _insertBefore(id: string, newBlock: Block, list: Block[]): Block[] {
+  const result: Block[] = []
+  for (const b of list) {
+    if (b.id === id) result.push(newBlock)
+    result.push({ ...b, children: _insertBefore(id, newBlock, b.children) })
+  }
+  return result
+}
+
 /** IDs of blocks whose direct content area intersects the DOM selection range. */
 function _selectedBlockIds(container: HTMLElement, range: Range): string[] {
   const areas = Array.from(
@@ -162,6 +222,8 @@ interface Props {
 export function BlockEditor({ blocks, onChange, allPages, onNavigate, onOpenSidebar, scrollToBlockId, onClearScrollTarget, zoomedBlockId, onZoom, onNavigateToBlock, onBlur }: Props) {
   const focusIdRef = useRef<string | null>(null)
   const editorRef = useRef<HTMLDivElement>(null)
+  const dragGhostRef = useRef<HTMLDivElement>(null)
+  const dropIndicatorRef = useRef<HTMLDivElement>(null)
   const emptyBlockIdRef = useRef(generateId())
 
   // Always-current refs so effects never have stale closures
@@ -190,6 +252,16 @@ export function BlockEditor({ blocks, onChange, allPages, onNavigate, onOpenSide
   const blockSelectModeRef = useRef(false)
   const blockSelectAnchorIdRef = useRef<string | null>(null)
   const isDraggingRef = useRef(false)
+
+  // ─── Block drag-and-drop state ─────────────────────────────────────────────
+  const blockDragActiveRef = useRef(false)
+  const blockDragSourceIdsRef = useRef<Set<string>>(new Set())
+  const blockDragStartXRef = useRef(0)
+  const blockDragDropTargetRef = useRef<{
+    refBlockId: string
+    position: 'before' | 'after'
+    targetDepth: number
+  } | null>(null)
 
   // ─── Scroll to block ──────────────────────────────────────────────────────────
 
@@ -1051,6 +1123,197 @@ export function BlockEditor({ blocks, onChange, allPages, onNavigate, onOpenSide
 
   // ─────────────────────────────────────────────────────────────────────────────
 
+  // ─── Block drag handle callback ──────────────────────────────────────────
+  const handleDragHandleMouseDown = useCallback((e: React.MouseEvent, blockId: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+
+    if (!selectedBlockIdsRef.current.has(blockId)) return
+
+    blockDragActiveRef.current = true
+    blockDragStartXRef.current = e.clientX
+
+    // Collect all IDs being dragged (selected roots + their children)
+    blockDragSourceIdsRef.current.clear()
+    const rawIds = Array.from(selectedBlockIdsRef.current)
+    const rootIds = _filterRoots(rawIds, blocksRef.current)
+    for (const rid of rootIds) {
+      const block = _findBlock(rid, blocksRef.current)
+      if (block) {
+        const addIds = (b: Block) => { blockDragSourceIdsRef.current.add(b.id); b.children.forEach(addIds) }
+        addIds(block)
+      }
+    }
+
+    // Show ghost
+    const ghost = dragGhostRef.current
+    if (ghost) {
+      const firstRoot = _findBlock(rootIds[0], blocksRef.current)
+      const count = rootIds.length
+      ghost.innerHTML = (count > 1 ? `<span class="drag-count-badge">${count}</span>` : '') +
+        (firstRoot?.content || '(empty)')
+      ghost.style.display = 'block'
+      ghost.style.left = (e.clientX + 12) + 'px'
+      ghost.style.top = (e.clientY - 14) + 'px'
+    }
+
+    // Mark source blocks visually
+    const container = editorRef.current
+    if (container) {
+      blockDragSourceIdsRef.current.forEach(id => {
+        container.querySelector(`[data-block-id="${id}"]`)?.classList.add('block-dragging-source')
+      })
+    }
+  }, [])
+
+  // ─── Block drag-and-drop: mousemove, mouseup, escape ──────────────────────
+  useEffect(() => {
+    const INDENT_PX = 30 // matches .block-children margin-left(24) + padding-left(6)
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (!blockDragActiveRef.current) return
+
+      const ghost = dragGhostRef.current
+      if (ghost) {
+        ghost.style.left = (e.clientX + 12) + 'px'
+        ghost.style.top = (e.clientY - 14) + 'px'
+      }
+
+      const container = editorRef.current
+      if (!container) return
+
+      // Find closest non-dragged block row
+      const allRows = Array.from(container.querySelectorAll<HTMLElement>('[data-block-id] > .block-row'))
+      let closest: HTMLElement | null = null
+      let closestDist = Infinity
+      let position: 'before' | 'after' = 'after'
+
+      for (const row of allRows) {
+        const blockEl = row.parentElement!
+        const blockId = blockEl.getAttribute('data-block-id')
+        if (!blockId || blockDragSourceIdsRef.current.has(blockId)) continue
+
+        const rect = row.getBoundingClientRect()
+        const midY = rect.top + rect.height / 2
+        const dist = Math.abs(e.clientY - midY)
+        if (dist < closestDist) {
+          closestDist = dist
+          closest = blockEl as HTMLElement
+          position = e.clientY < midY ? 'before' : 'after'
+        }
+      }
+
+      const indicator = dropIndicatorRef.current
+      if (!indicator) return
+
+      if (closest && closestDist < 50) {
+        const refId = closest.getAttribute('data-block-id')!
+        const refDepthMap = _buildDepthMap(blocksRef.current, 0)
+        const refDepth = refDepthMap.get(refId) ?? 0
+
+        const deltaX = e.clientX - blockDragStartXRef.current
+        const indentShift = Math.round(deltaX / INDENT_PX)
+        const targetDepth = Math.max(0, Math.min(refDepth + 1, refDepth + indentShift))
+
+        const row = closest.querySelector(':scope > .block-row') as HTMLElement
+        const rowRect = row.getBoundingClientRect()
+        const containerRect = container.getBoundingClientRect()
+
+        const leftOffset = targetDepth * INDENT_PX
+        indicator.style.display = 'block'
+        indicator.style.left = leftOffset + 'px'
+        indicator.style.top = (position === 'before'
+          ? rowRect.top - containerRect.top - 1
+          : rowRect.bottom - containerRect.top - 1
+        ) + 'px'
+        indicator.style.right = '0'
+
+        blockDragDropTargetRef.current = { refBlockId: refId, position, targetDepth }
+      } else {
+        indicator.style.display = 'none'
+        blockDragDropTargetRef.current = null
+      }
+    }
+
+    const onMouseUp = () => {
+      if (!blockDragActiveRef.current) return
+      blockDragActiveRef.current = false
+
+      if (dragGhostRef.current) dragGhostRef.current.style.display = 'none'
+      if (dropIndicatorRef.current) dropIndicatorRef.current.style.display = 'none'
+
+      const container = editorRef.current
+      if (container) {
+        blockDragSourceIdsRef.current.forEach(id => {
+          container.querySelector(`[data-block-id="${id}"]`)?.classList.remove('block-dragging-source')
+        })
+      }
+
+      const target = blockDragDropTargetRef.current
+      if (target) {
+        const rawIds = Array.from(selectedBlockIdsRef.current)
+        const rootIds = _filterRoots(rawIds, blocksRef.current)
+        const rootBlocks = rootIds
+          .map(id => _findBlock(id, blocksRef.current))
+          .filter(Boolean) as Block[]
+
+        if (rootBlocks.length > 0) {
+          // Push undo
+          undoStackRef.current.push(JSON.parse(JSON.stringify(blocksRef.current)))
+          redoStackRef.current = []
+          if (undoStackRef.current.length > 100) undoStackRef.current.shift()
+
+          const cloned = JSON.parse(JSON.stringify(rootBlocks)) as Block[]
+
+          let newTree = blocksRef.current
+          for (const id of rootIds) newTree = _removeBlock(id, newTree)
+
+          newTree = _insertBlocksAtTarget(
+            newTree,
+            target.refBlockId,
+            target.position,
+            target.targetDepth,
+            cloned
+          )
+
+          onChangeRef.current(newTree)
+        }
+      }
+
+      blockDragSourceIdsRef.current.clear()
+      blockDragDropTargetRef.current = null
+    }
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && blockDragActiveRef.current) {
+        e.preventDefault()
+        blockDragActiveRef.current = false
+
+        if (dragGhostRef.current) dragGhostRef.current.style.display = 'none'
+        if (dropIndicatorRef.current) dropIndicatorRef.current.style.display = 'none'
+
+        const container = editorRef.current
+        if (container) {
+          blockDragSourceIdsRef.current.forEach(id => {
+            container.querySelector(`[data-block-id="${id}"]`)?.classList.remove('block-dragging-source')
+          })
+        }
+
+        blockDragSourceIdsRef.current.clear()
+        blockDragDropTargetRef.current = null
+      }
+    }
+
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [])
+
   const consumeFocusId = useCallback(() => {
     const id = focusIdRef.current
     focusIdRef.current = null
@@ -1092,8 +1355,13 @@ export function BlockEditor({ blocks, onChange, allPages, onNavigate, onOpenSide
           onPasteBlocks={handlePasteBlocks}
           onZoom={onZoom}
           onNavigateToBlock={onNavigateToBlock}
+          hasBlockSelection={selectedBlockIdsRef.current.size > 0}
+          onDragHandleMouseDown={handleDragHandleMouseDown}
         />
       ))}
+      {/* Drag-and-drop visual elements */}
+      <div className="block-drag-ghost" ref={dragGhostRef} />
+      <div className="block-drop-indicator" ref={dropIndicatorRef} />
     </div>
   )
 }

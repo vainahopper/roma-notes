@@ -783,7 +783,9 @@ export function BlockItem({
               onChange={onChange} onToggleCheck={onToggleCheck} onToggleTodo={onToggleTodo} onEnter={onEnter}
               onBackspace={onBackspace} onTab={onTab} onArrowUp={onArrowUp} onArrowDown={onArrowDown}
               onNavigate={onNavigate} onOpenSidebar={onOpenSidebar} onDelete={onDelete}
-              onPasteBlocks={onPasteBlocks} onZoom={onZoom} onNavigateToBlock={onNavigateToBlock} />
+              onPasteBlocks={onPasteBlocks} onZoom={onZoom} onNavigateToBlock={onNavigateToBlock}
+              hasBlockSelection={hasBlockSelection}
+              onDragHandleMouseDown={onDragHandleMouseDown} />
           ))}
         </div>
       )}
