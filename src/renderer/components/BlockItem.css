@@ -104,6 +104,7 @@
   color: var(--accent);
   cursor: grab;
   opacity: 0;
+  pointer-events: none;
   transition: opacity 0.12s;
   z-index: 2;
   border-radius: 3px;
@@ -112,6 +113,7 @@
 
 .block-item.block-selected .block-row:hover .block-drag-handle {
   opacity: 0.7;
+  pointer-events: auto;
 }
 
 .block-drag-handle:hover {
