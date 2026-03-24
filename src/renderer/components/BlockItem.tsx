@@ -30,6 +30,8 @@ interface Props {
   onPasteBlocks?: (id: string, contentBefore: string, contentAfter: string, pastedText: string) => void
   onZoom?: (id: string, content: string) => void
   onNavigateToBlock?: (pageId: string, pageTitle: string, blockId: string) => void
+  hasBlockSelection?: boolean
+  onDragHandleMouseDown?: (e: React.MouseEvent, blockId: string) => void
 }
 
 /** Recursively build indented plain text from a block subtree (4 spaces + bullet per level). */
@@ -44,6 +46,7 @@ export function BlockItem({
   block, depth, allPages, requestFocusId, onConsumeFocus,
   onChange, onToggleCheck, onToggleTodo, onEnter, onBackspace, onTab,
   onArrowUp, onArrowDown, onNavigate, onOpenSidebar, onDelete, onPasteBlocks, onZoom, onNavigateToBlock,
+  hasBlockSelection, onDragHandleMouseDown,
 }: Props) {
   const [editing, setEditing] = useState(false)
   const [content, setContent] = useState(block.content)
@@ -575,6 +578,21 @@ export function BlockItem({
   const isTodo = block.checked !== null && block.checked !== undefined
   const hasChildren = block.children.length > 0
 
+  // Detect Key:: value attribute pattern for inline rendering while editing
+  const attrMatch = useMemo(() => {
+    const m = content.match(/^([^:\n]+)::\s(.*)$/s)
+    return m ? { key: m[1], prefix: m[1] + ':: ' } : null
+  }, [content])
+  const attrMeasureRef = useRef<HTMLSpanElement>(null)
+  const [attrOverlayWidth, setAttrOverlayWidth] = useState(0)
+  useLayoutEffect(() => {
+    if (attrMatch && editing && attrMeasureRef.current) {
+      setAttrOverlayWidth(attrMeasureRef.current.offsetWidth)
+    } else {
+      setAttrOverlayWidth(0)
+    }
+  }, [attrMatch, editing])
+
   // Click on rendered block → enter edit mode with cursor at the clicked position
   const handleContentAreaClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (editing) return
@@ -644,6 +662,14 @@ export function BlockItem({
         </div>
 
         <div className="block-bullet-area">
+          {/* Drag handle — visible only when block is selected + hovered (CSS controls visibility) */}
+          {hasBlockSelection && (
+            <span
+              className="block-drag-handle"
+              onMouseDown={(e) => onDragHandleMouseDown?.(e, block.id)}
+              title="Drag to move"
+            >⠿</span>
+          )}
           {isTodo ? (
             <span className="block-bullet">
               <span className="block-bullet-dot" />
@@ -685,27 +711,37 @@ export function BlockItem({
 
         <div className="block-content-area" onClick={handleContentAreaClick}>
           {editing ? (
-            <textarea
-              ref={textareaRef}
-              className={`block-textarea ${isTodo && block.checked ? 'done-text' : ''}`}
-              value={content}
-              onChange={handleContentChange}
-              onKeyDown={handleKeyDown}
-              onPaste={handlePaste}
-              onCopy={handleCopy}
-              onBlur={() => setTimeout(() => {
-                if (showEncryptModalRef.current) return
-                if (justUnlockedRef.current) return  // skip re-encrypt on blur right after Touch ID unlock
-                if (isUnlocked && unlockPassword) {
-                  reEncrypt(textareaRef.current?.value ?? content, unlockPassword)
-                } else {
-                  setEditing(false)
-                  closeAllMenus()
-                }
-              }, 150)}
-              rows={1}
-              spellCheck
-            />
+            <div className="block-textarea-wrapper">
+              {attrMatch && editing && (
+                <>
+                  {/* Hidden span to measure the textarea prefix width */}
+                  <span className="attr-measure" ref={attrMeasureRef} aria-hidden="true">{attrMatch.prefix}</span>
+                  {/* Visible overlay that covers the prefix with styled text */}
+                  <span className="attr-key-overlay" style={{ minWidth: attrOverlayWidth || undefined }} aria-hidden="true">{attrMatch.key}:</span>
+                </>
+              )}
+              <textarea
+                ref={textareaRef}
+                className={`block-textarea ${isTodo && block.checked ? 'done-text' : ''}`}
+                value={content}
+                onChange={handleContentChange}
+                onKeyDown={handleKeyDown}
+                onPaste={handlePaste}
+                onCopy={handleCopy}
+                onBlur={() => setTimeout(() => {
+                  if (showEncryptModalRef.current) return
+                  if (justUnlockedRef.current) return  // skip re-encrypt on blur right after Touch ID unlock
+                  if (isUnlocked && unlockPassword) {
+                    reEncrypt(textareaRef.current?.value ?? content, unlockPassword)
+                  } else {
+                    setEditing(false)
+                    closeAllMenus()
+                  }
+                }, 150)}
+                rows={1}
+                spellCheck
+              />
+            </div>
           ) : (
             <div className={`block-rendered ${isTodo && block.checked ? 'done-text' : ''}`}>
               {isEncrypted && !isUnlocked
