@@ -8,7 +8,7 @@
   align-items: flex-start;
   justify-content: center;
   z-index: 900;
-  padding-top: 15vh;
+  padding-top: 8vh;
 }
 
 .search-modal {
@@ -64,7 +64,7 @@
 }
 
 .search-results {
-  max-height: 380px;
+  max-height: 60vh;
   overflow-y: auto;
   padding: 6px;
 }
@@ -123,6 +123,29 @@
   font-size: 14px;
   font-weight: 500;
   color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Block result: content is the hero */
+.result-block-main {
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Page breadcrumb under block content */
+.result-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

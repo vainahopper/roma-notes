@@ -36,7 +36,7 @@ export function SearchModal({ pages, onClose, onNavigate }: Props) {
 
   useEffect(() => {
     if (query.trim()) {
-      const r = search(query, 20)
+      const r = search(query, 100)
       setResults(r)
       setSelected(0)
     } else {
@@ -100,13 +100,28 @@ export function SearchModal({ pages, onClose, onNavigate }: Props) {
     return () => window.removeEventListener('keydown', handler)
   }, [results, selected, totalItems, createIndex, onNavigate, onClose, trimmedQuery])
 
+  function normalizeAccents(str: string): string {
+    return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  }
+
   function highlight(text: string, q: string): React.ReactNode {
     if (!q.trim()) return text
-    const regex = new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi')
-    const parts = text.split(regex)
-    return parts.map((part, i) =>
-      regex.test(part) ? <mark key={i}>{part}</mark> : <span key={i}>{part}</span>
-    )
+    const normalizedText = normalizeAccents(text)
+    const normalizedQ = normalizeAccents(q)
+    const escaped = normalizedQ.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const regex = new RegExp(escaped, 'gi')
+    const parts: React.ReactNode[] = []
+    let lastIndex = 0
+    let match: RegExpExecArray | null
+    while ((match = regex.exec(normalizedText)) !== null) {
+      if (match.index > lastIndex)
+        parts.push(<span key={lastIndex}>{text.slice(lastIndex, match.index)}</span>)
+      parts.push(<mark key={match.index}>{text.slice(match.index, match.index + match[0].length)}</mark>)
+      lastIndex = match.index + match[0].length
+    }
+    if (lastIndex < text.length)
+      parts.push(<span key={lastIndex}>{text.slice(lastIndex)}</span>)
+    return parts.length > 0 ? parts : text
   }
 
   return (
@@ -155,9 +170,21 @@ export function SearchModal({ pages, onClose, onNavigate }: Props) {
                 )}
               </div>
               <div className="result-content">
-                <div className="result-page">{highlight(result.pageTitle, query)}</div>
-                {result.type === 'block' && result.content !== result.pageTitle && (
-                  <div className="result-block">{highlight(result.content, query)}</div>
+                {result.type === 'block' ? (
+                  <>
+                    <div className="result-block-main">{highlight(result.content, query)}</div>
+                    <div className="result-breadcrumb">
+                      <svg width="10" height="10" viewBox="0 0 12 12" fill="none" style={{flexShrink:0}}>
+                        <rect x="1" y="1" width="10" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.2"/>
+                        <line x1="3" y1="4" x2="9" y2="4" stroke="currentColor" strokeWidth="1"/>
+                        <line x1="3" y1="6" x2="9" y2="6" stroke="currentColor" strokeWidth="1"/>
+                        <line x1="3" y1="8" x2="6" y2="8" stroke="currentColor" strokeWidth="1"/>
+                      </svg>
+                      {result.pageTitle}
+                    </div>
+                  </>
+                ) : (
+                  <div className="result-page">{highlight(result.pageTitle, query)}</div>
                 )}
               </div>
               <div className="result-arrow">→</div>
