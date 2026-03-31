@@ -590,7 +590,7 @@ export function BlockEditor({ blocks, onChange, allPages, onNavigate, onOpenSide
     onChange(newBlocks)
   }, [blocks, onChange])
 
-  const handleEnter = useCallback((id: string, cursorPos: number, content: string) => {
+  const handleEnter = useCallback((id: string, cursorPos: number, content: string, isCollapsed?: boolean) => {
     flushAndPushHistory(blocks)
 
     // Phantom placeholder block in zoom mode (not yet in tree) — materialise it and split.
@@ -674,9 +674,9 @@ export function BlockEditor({ blocks, onChange, allPages, onNavigate, onOpenSide
     const now = new Date().toISOString()
     const newBlock: Block = { id: newId, content: after, children: [], checked: null, createdAt: now, updatedAt: now }
 
-    // Block has children → new block always becomes first child (stays right below current line)
-    // Block has no children → new block is a sibling inserted after
-    if (block.children.length > 0) {
+    // Block has children and is NOT collapsed → new block becomes first child (stays right below current line)
+    // Block is collapsed or has no children → new block is a sibling inserted after
+    if (block.children.length > 0 && !isCollapsed) {
       newBlocks = updateBlock(id, b => ({ ...b, children: [newBlock, ...b.children] }), newBlocks)
     } else {
       newBlocks = insertAfter(id, newBlock, newBlocks)

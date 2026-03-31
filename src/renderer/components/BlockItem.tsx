@@ -19,7 +19,7 @@ interface Props {
   onChange: (id: string, content: string) => void
   onToggleCheck: (id: string) => void
   onToggleTodo: (id: string) => void
-  onEnter: (id: string, cursorPos: number, content: string) => void
+  onEnter: (id: string, cursorPos: number, content: string, isCollapsed?: boolean) => void
   onBackspace: (id: string, isEmpty: boolean, isCollapsed?: boolean) => void
   onTab: (id: string, shift: boolean) => void
   onArrowUp: (id: string) => void
@@ -233,6 +233,42 @@ export function BlockItem({
 
     const ta = textareaRef.current
 
+    // ⌘+B / ⌘+I → bold / italic formatting
+    if ((e.metaKey || e.ctrlKey) && (e.key === 'b' || e.key === 'i') && ta) {
+      e.preventDefault()
+      const marker = e.key === 'b' ? '**' : '__'
+      const selStart = ta.selectionStart
+      const selEnd = ta.selectionEnd
+      const val = ta.value
+      if (selEnd > selStart) {
+        const selected = val.slice(selStart, selEnd)
+        const before = val.slice(0, selStart)
+        const after = val.slice(selEnd)
+        // Toggle: detect if already wrapped (markers outside OR inside selection)
+        if (before.endsWith(marker) && after.startsWith(marker)) {
+          // Markers are outside the selection: **[hello]** → hello
+          const newVal = before.slice(0, -marker.length) + selected + after.slice(marker.length)
+          setContent(newVal); onChange(block.id, newVal)
+          setTimeout(() => ta.setSelectionRange(selStart - marker.length, selEnd - marker.length), 0)
+        } else if (selected.startsWith(marker) && selected.endsWith(marker) && selected.length > marker.length * 2) {
+          // Markers are inside the selection: [**hello**] → hello
+          const inner = selected.slice(marker.length, -marker.length)
+          const newVal = before + inner + after
+          setContent(newVal); onChange(block.id, newVal)
+          setTimeout(() => ta.setSelectionRange(selStart, selStart + inner.length), 0)
+        } else {
+          const newVal = before + marker + selected + marker + after
+          setContent(newVal); onChange(block.id, newVal)
+          setTimeout(() => ta.setSelectionRange(selStart + marker.length, selEnd + marker.length), 0)
+        }
+      } else {
+        const newVal = val.slice(0, selStart) + marker + marker + val.slice(selStart)
+        setContent(newVal); onChange(block.id, newVal)
+        setTimeout(() => ta.setSelectionRange(selStart + marker.length, selStart + marker.length), 0)
+      }
+      return
+    }
+
     // ⌘+Enter → add / remove TODO entirely
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault()
@@ -309,7 +345,7 @@ export function BlockItem({
           // while the parent block already has the split content.
           // Skip when pos=0: inserting above leaves this block unchanged.
           if (pos > 0) setContent(content.slice(0, pos))
-          onEnter(block.id, pos, content)
+          onEnter(block.id, pos, content, collapsed)
         }
         break
 
