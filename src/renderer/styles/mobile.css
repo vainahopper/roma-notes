@@ -315,6 +315,16 @@
 
   .page-scroll {
     -webkit-overflow-scrolling: touch;
+    overflow-y: scroll; /* force scroll on iOS (auto can silently fail) */
+    min-height: 0;      /* critical: lets flex child shrink so scroll activates */
+  }
+
+  .page-view {
+    min-height: 0; /* propagate constraint down the flex chain */
+  }
+
+  .app-main {
+    min-height: 0;
   }
 
   /* ─── Daily notes ──────────────────────────────────────────────────── */
