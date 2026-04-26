@@ -66,6 +66,8 @@ export function BlockItem({
   const [unlockPassword, setUnlockPassword] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const showEncryptModalRef = useRef(false)
+  const autoLockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const AUTO_LOCK_MS = 5 * 60 * 1000
   // Pending cursor position: set before setEditing(true); consumed by useLayoutEffect
   const pendingCursorPos = useRef<number | null>(null)
   // Guard: prevents re-encryption on the blur that fires right after Touch ID unlock
@@ -98,6 +100,7 @@ export function BlockItem({
   contentRef.current = content
   useEffect(() => {
     return () => {
+      cancelAutoLock()
       const pw = unlockPasswordRef.current
       const ct = contentRef.current
       if (pw && ct && !isEncryptedBlock(ct)) {
@@ -138,7 +141,11 @@ export function BlockItem({
     const val = e.target.value
     const cursor = e.target.selectionStart
     setContent(val)
-    onChange(block.id, val)
+    // Don't propagate plaintext to the store while the block is unlocked —
+    // doing so would write it to disk and iCloud on every keystroke.
+    // reEncrypt() (on blur/unmount) calls onChange with the encrypted form.
+    if (!isUnlocked) onChange(block.id, val)
+    else scheduleAutoLock()
 
     const textBefore = val.slice(0, cursor)
 
@@ -175,7 +182,7 @@ export function BlockItem({
     }
 
     closeAllMenus()
-  }, [block.id, onChange, closeAllMenus])
+  }, [block.id, onChange, closeAllMenus, isUnlocked, scheduleAutoLock])
 
   // Intercept paste of indented outlines (Roam/Obsidian style) and create nested blocks
   const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
@@ -582,6 +589,14 @@ export function BlockItem({
       action: () => applySlashCommand((base) => { const ta=textareaRef.current; const nc='## '+base.replace(/^#+\s*/,''); setContent(nc); onChange(block.id,nc); setTimeout(()=>{ ta?.focus(); ta?.setSelectionRange(nc.length,nc.length) },0) }) },
     { id: 'h3', label: 'Heading 3', description: '### Small heading', icon: 'H3',
       action: () => applySlashCommand((base) => { const ta=textareaRef.current; const nc='### '+base.replace(/^#+\s*/,''); setContent(nc); onChange(block.id,nc); setTimeout(()=>{ ta?.focus(); ta?.setSelectionRange(nc.length,nc.length) },0) }) },
+    { id: 'slider', label: 'Slider', description: 'Insert a 0–10 slider', icon: '▬',
+      action: () => applySlashCommand((base, cur) => {
+        const ta = textareaRef.current
+        const token = '{{slider:5}}'
+        const nv = base.slice(0, cur) + token + base.slice(cur)
+        setContent(nv); onChange(block.id, nv)
+        setTimeout(() => { ta?.setSelectionRange(cur + token.length, cur + token.length); ta?.focus() }, 0)
+      }) },
   ]
 
   // ── ;; Template system ─────────────────────────────────────────────────────
@@ -644,18 +659,36 @@ export function BlockItem({
     // Guard against the blur that fires when window regains focus after Touch ID system dialog
     justUnlockedRef.current = true
     setEditing(true)
+    scheduleAutoLock()
     platform.saveKey(block.id, password).catch(() => {})
     setTimeout(() => { justUnlockedRef.current = false }, 800)
-  }, [block.id])
+  }, [block.id, scheduleAutoLock])
+
+  const cancelAutoLock = useCallback(() => {
+    if (autoLockTimerRef.current) {
+      clearTimeout(autoLockTimerRef.current)
+      autoLockTimerRef.current = null
+    }
+  }, [])
 
   // Re-encrypt with the unlock password and lock the block
   const reEncrypt = useCallback(async (currentContent: string, password: string) => {
+    cancelAutoLock()
     const encrypted = await encryptBlock(currentContent, password)
     setContent(encrypted)
     onChange(block.id, encrypted)
     setUnlockPassword(null)
     setEditing(false)
-  }, [block.id, onChange])
+  }, [block.id, onChange, cancelAutoLock])
+
+  const scheduleAutoLock = useCallback(() => {
+    if (autoLockTimerRef.current) clearTimeout(autoLockTimerRef.current)
+    autoLockTimerRef.current = setTimeout(() => {
+      const pw = unlockPasswordRef.current
+      const ct = contentRef.current
+      if (pw && ct && !isEncryptedBlock(ct)) reEncrypt(ct, pw)
+    }, AUTO_LOCK_MS)
+  }, [reEncrypt])
 
   const handleEncrypt = useCallback(async (password: string) => {
     const encrypted = await encryptBlock(content, password)
@@ -837,14 +870,22 @@ export function BlockItem({
                   }
                 }, 150)}
                 rows={1}
-                spellCheck
+                spellCheck={!isUnlocked}
               />
             </div>
           ) : (
             <div className={`block-rendered ${isTodo && block.checked ? 'done-text' : ''}`}>
               {isEncrypted && !isUnlocked
                 ? <EncryptedBlockView blockId={block.id} content={block.content} onUnlock={handleUnlock} />
-                : <BlockContent content={content} checked={block.checked} allPages={allPages} onNavigate={onNavigate} onOpenSidebar={onOpenSidebar} onNavigateToBlock={onNavigateToBlock} />
+                : <BlockContent
+                    content={content}
+                    checked={block.checked}
+                    allPages={allPages}
+                    onNavigate={onNavigate}
+                    onOpenSidebar={onOpenSidebar}
+                    onNavigateToBlock={onNavigateToBlock}
+                    onSliderChange={(newContent) => { setContent(newContent); onChange(block.id, newContent) }}
+                  />
               }
             </div>
           )}
@@ -962,7 +1003,9 @@ function EncryptedBlockView({ blockId, content, onUnlock }: {
       setError(false)
       try { await platform.saveKey(blockId, password) } catch {}
       setHasStoredKey(true)
-      onUnlock(result, password)
+      const pw = password
+      setPassword('')  // clear from state before handing up
+      onUnlock(result, pw)
     } else {
       setError(true)
     }
