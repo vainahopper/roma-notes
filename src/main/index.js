@@ -352,7 +352,9 @@ function applyUpdate(win, info) {
 
         sendProgress('Installing…', 70)
         execSync(`ditto "${sourceApp}" "${destApp}"`)
-        execSync(`xattr -dr com.apple.quarantine "${destApp}" 2>/dev/null || true`)
+        execSync(`xattr -cr "${destApp}" 2>/dev/null || true`)
+        // Ad-hoc re-sign so Gatekeeper doesn't reject the freshly-copied app on launch
+        execSync(`codesign --force --deep --sign - "${destApp}" 2>/dev/null || true`)
 
         sendProgress('Finishing…', 90)
         execSync(`hdiutil detach "${mountPoint}" -quiet || true`)
