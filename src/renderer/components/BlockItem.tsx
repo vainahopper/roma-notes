@@ -98,6 +98,26 @@ export function BlockItem({
   const contentRef = useRef(content)
   unlockPasswordRef.current = unlockPassword
   contentRef.current = content
+
+  // Stable auto-lock helpers — declared early to avoid TDZ when referenced
+  // from earlier useCallback dependency arrays (handleContentChange, handleUnlock).
+  // reEncrypt is declared later but called via reEncryptRef to break the cycle.
+  const reEncryptRef = useRef<((c: string, p: string) => Promise<void>) | null>(null)
+  const cancelAutoLock = useCallback(() => {
+    if (autoLockTimerRef.current) {
+      clearTimeout(autoLockTimerRef.current)
+      autoLockTimerRef.current = null
+    }
+  }, [])
+  const scheduleAutoLock = useCallback(() => {
+    if (autoLockTimerRef.current) clearTimeout(autoLockTimerRef.current)
+    autoLockTimerRef.current = setTimeout(() => {
+      const pw = unlockPasswordRef.current
+      const ct = contentRef.current
+      if (pw && ct && !isEncryptedBlock(ct)) reEncryptRef.current?.(ct, pw)
+    }, AUTO_LOCK_MS)
+  }, [])
+
   useEffect(() => {
     return () => {
       cancelAutoLock()
@@ -664,13 +684,6 @@ export function BlockItem({
     setTimeout(() => { justUnlockedRef.current = false }, 800)
   }, [block.id, scheduleAutoLock])
 
-  const cancelAutoLock = useCallback(() => {
-    if (autoLockTimerRef.current) {
-      clearTimeout(autoLockTimerRef.current)
-      autoLockTimerRef.current = null
-    }
-  }, [])
-
   // Re-encrypt with the unlock password and lock the block
   const reEncrypt = useCallback(async (currentContent: string, password: string) => {
     cancelAutoLock()
@@ -680,15 +693,7 @@ export function BlockItem({
     setUnlockPassword(null)
     setEditing(false)
   }, [block.id, onChange, cancelAutoLock])
-
-  const scheduleAutoLock = useCallback(() => {
-    if (autoLockTimerRef.current) clearTimeout(autoLockTimerRef.current)
-    autoLockTimerRef.current = setTimeout(() => {
-      const pw = unlockPasswordRef.current
-      const ct = contentRef.current
-      if (pw && ct && !isEncryptedBlock(ct)) reEncrypt(ct, pw)
-    }, AUTO_LOCK_MS)
-  }, [reEncrypt])
+  reEncryptRef.current = reEncrypt
 
   const handleEncrypt = useCallback(async (password: string) => {
     const encrypted = await encryptBlock(content, password)
