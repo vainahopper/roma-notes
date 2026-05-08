@@ -1,5 +1,5 @@
 import type { PlatformAdapter } from './adapter'
-import type { Page, PageMeta, AppSettings } from '../../shared/types'
+import type { Page, PageMeta, AppSettings, Block } from '../../shared/types'
 import { BiometricAuth } from '@aparajita/capacitor-biometric-auth'
 import { SecureStorage } from '@aparajita/capacitor-secure-storage'
 
@@ -266,6 +266,56 @@ export function createCapacitorAdapter(): PlatformAdapter {
           return check(page.blocks)
         }
 
+        // ─── Block-level merge (mirrors src/main/index.js mergePages) ──────
+        // Prevents data loss when Mac and iPhone edit the same page concurrently.
+        // Same logic and trade-offs as the Mac side; see comments there.
+        function blockIdSet(blocks: Block[]): Set<string> {
+          const out = new Set<string>()
+          const walk = (arr: Block[]) => {
+            for (const b of arr || []) {
+              out.add(b.id)
+              if (b.children?.length) walk(b.children)
+            }
+          }
+          walk(blocks)
+          return out
+        }
+        function mergeBlock(a: Block, b: Block): Block {
+          const aTs = a.updatedAt || ''
+          const bTs = b.updatedAt || ''
+          const winner = aTs >= bTs ? a : b
+          const loser  = aTs >= bTs ? b : a
+          return {
+            ...winner,
+            children: mergeBlockLists(winner.children || [], loser.children || []),
+          }
+        }
+        function mergeBlockLists(newer: Block[], older: Block[]): Block[] {
+          const olderMap = new Map<string, Block>()
+          for (const b of older || []) olderMap.set(b.id, b)
+          const seen = new Set<string>()
+          const out: Block[] = []
+          for (const b of newer || []) {
+            seen.add(b.id)
+            const o = olderMap.get(b.id)
+            out.push(o ? mergeBlock(b, o) : b)
+          }
+          for (const b of older || []) {
+            if (!seen.has(b.id)) out.push(b)
+          }
+          return out
+        }
+        function mergePages(cloudPage: Page, localPage: Page): Page {
+          const cloudNewer = (cloudPage.updatedAt || '') >= (localPage.updatedAt || '')
+          const newer = cloudNewer ? cloudPage : localPage
+          const older = cloudNewer ? localPage : cloudPage
+          return {
+            ...newer,
+            blocks: mergeBlockLists(newer.blocks || [], older.blocks || []),
+            updatedAt: new Date().toISOString(),
+          }
+        }
+
         // Merge with local IndexedDB — content always beats no-content regardless of timestamp.
         // This prevents the "empty stub cycle": a device auto-creates an empty placeholder for a
         // past daily note (newer timestamp), pushes it to iCloud, and overwrites real content from
@@ -298,20 +348,35 @@ export function createCapacitorAdapter(): PlatformAdapter {
             } catch (e) {
               console.warn('[Roma] syncPull: push local-content-over-cloud-stub failed:', localPage.id, e)
             }
-          } else if (cloudPage.updatedAt > localPage.updatedAt) {
-            // Both have content (or both empty) and cloud is newer → accept cloud
-            await idbPut(PAGES_STORE, cloudPage)
-            merged.push(cloudPage)
-            console.log('[Roma] syncPull: cloud newer:', cloudPage.id)
-          } else if (localPage.updatedAt > cloudPage.updatedAt && localHasContent) {
-            // Both have content and local is newer → push local to cloud
-            try {
-              await plugin.pushPage({ id: localPage.id, json: JSON.stringify(localPage) })
-            } catch (e) {
-              console.warn('[Roma] syncPull: push local-newer failed:', localPage.id, e)
+          } else if (cloudHasContent && localHasContent) {
+            // Both have content. Block sets differ → concurrent edits, merge by id so
+            // nothing is lost. Same set → fall back to last-write-wins (cheap path).
+            const cloudIds = blockIdSet(cloudPage.blocks)
+            const localIds = blockIdSet(localPage.blocks)
+            const sameSet = cloudIds.size === localIds.size && [...cloudIds].every(id => localIds.has(id))
+            if (!sameSet) {
+              const mergedPage = mergePages(cloudPage, localPage)
+              console.log('[Roma] syncPull: merging concurrent edits for', cloudPage.id, '(cloud=' + cloudIds.size, 'local=' + localIds.size, 'merged=' + mergedPage.blocks.length + ')')
+              await idbPut(PAGES_STORE, mergedPage)
+              merged.push(mergedPage)
+              try {
+                await plugin.pushPage({ id: mergedPage.id, json: JSON.stringify(mergedPage) })
+              } catch (e) {
+                console.warn('[Roma] syncPull: push merged failed:', mergedPage.id, e)
+              }
+            } else if (cloudPage.updatedAt > localPage.updatedAt) {
+              await idbPut(PAGES_STORE, cloudPage)
+              merged.push(cloudPage)
+              console.log('[Roma] syncPull: cloud newer:', cloudPage.id)
+            } else if (localPage.updatedAt > cloudPage.updatedAt) {
+              try {
+                await plugin.pushPage({ id: localPage.id, json: JSON.stringify(localPage) })
+              } catch (e) {
+                console.warn('[Roma] syncPull: push local-newer failed:', localPage.id, e)
+              }
             }
           }
-          // else: timestamps equal, or both empty — no action needed
+          // else: both empty — no action needed
         }
         // Push local-only pages to cloud — only pages with real content
         const allLocal = await idbGetAll<Page>(PAGES_STORE)

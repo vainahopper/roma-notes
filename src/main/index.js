@@ -70,6 +70,67 @@ function pageHasRealContent(page) {
   return check(page.blocks)
 }
 
+// ─── Page merge (block-level, by id) ─────────────────────────────────────────
+// Prevents data loss when Mac and iPhone edit the same page concurrently.
+// Without this, the device that pushes last would replace the other's whole
+// page (last-write-wins on the page). With this merge:
+//   - blocks present on both sides: take the per-block newer `updatedAt`
+//   - blocks present only on one side: kept (appended after the newer side's blocks)
+//   - children merged recursively
+// Trade-off: there are no tombstones, so a block deleted on one device may
+// resurrect from the other device's older copy. For a personal notes app,
+// resurrecting a block is preferable to silently losing real edits.
+
+function blockIdSet(blocks) {
+  const out = new Set()
+  function walk(arr) {
+    for (const b of arr || []) {
+      out.add(b.id)
+      if (b.children?.length) walk(b.children)
+    }
+  }
+  walk(blocks)
+  return out
+}
+
+function mergeBlock(a, b) {
+  const aTs = a.updatedAt || ''
+  const bTs = b.updatedAt || ''
+  const winner = aTs >= bTs ? a : b
+  const loser  = aTs >= bTs ? b : a
+  return {
+    ...winner,
+    children: mergeBlockLists(winner.children || [], loser.children || []),
+  }
+}
+
+function mergeBlockLists(newer, older) {
+  const olderMap = new Map()
+  for (const b of older || []) olderMap.set(b.id, b)
+  const seen = new Set()
+  const out = []
+  for (const b of newer || []) {
+    seen.add(b.id)
+    const o = olderMap.get(b.id)
+    out.push(o ? mergeBlock(b, o) : b)
+  }
+  for (const b of older || []) {
+    if (!seen.has(b.id)) out.push(b)
+  }
+  return out
+}
+
+function mergePages(cloudPage, localPage) {
+  const cloudNewer = (cloudPage.updatedAt || '') >= (localPage.updatedAt || '')
+  const newer = cloudNewer ? cloudPage : localPage
+  const older = cloudNewer ? localPage : cloudPage
+  return {
+    ...newer,
+    blocks: mergeBlockLists(newer.blocks || [], older.blocks || []),
+    updatedAt: new Date().toISOString(), // bump so the merged version supersedes both sides
+  }
+}
+
 /** Pull all pages from iCloud and merge with local. Returns pages that were newer in iCloud. */
 async function pullFromICloud() {
   const merged = []
@@ -83,36 +144,42 @@ async function pullFromICloud() {
         const localPath = path.join(PAGES_DIR, `${sanitizeFilename(cloudPage.id)}.json`)
         if (fs.existsSync(localPath)) {
           const localPage = JSON.parse(await fs.promises.readFile(localPath, 'utf-8'))
-          // Cloud page is newer → update local, BUT never overwrite real content with an empty stub.
-          // An empty stub (all blocks blank) is created when a device navigates to a date before
-          // its local sync has completed. Without this guard such stubs corrupt real notes.
-          if (cloudPage.updatedAt > localPage.updatedAt) {
-            const cloudHasContent = pageHasRealContent(cloudPage)
-            const localHasContent = pageHasRealContent(localPage)
-            if (cloudHasContent || !localHasContent) {
-              // Cloud has real data, or both are empty → accept cloud version
+          const cloudHasContent = pageHasRealContent(cloudPage)
+          const localHasContent = pageHasRealContent(localPage)
+
+          // Empty-stub protection (kept from the prior implementation): a stub must
+          // never overwrite real content. Stubs come from a device opening a daily
+          // note before sync has completed.
+          if (cloudHasContent && !localHasContent) {
+            // Cloud has data, local is empty → accept cloud regardless of timestamp
+            await fs.promises.writeFile(localPath, JSON.stringify(cloudPage, null, 2))
+            merged.push(cloudPage)
+          } else if (!cloudHasContent && localHasContent) {
+            // Cloud is empty, local has data → push local to cloud regardless of timestamp
+            console.log(`iCloud sync: keeping real local content for ${cloudPage.id} (cloud stub discarded)`)
+            syncPageToICloud(localPage)
+          } else if (cloudHasContent && localHasContent) {
+            // Both sides have content. If the block sets differ, this is a concurrent
+            // edit (e.g. Mac wrote A,B while iPhone wrote C) → merge by block id so
+            // nothing is lost. If the block sets are identical, fall back to
+            // last-write-wins on the page (cheap path, no ping-pong).
+            const cloudIds = blockIdSet(cloudPage.blocks)
+            const localIds = blockIdSet(localPage.blocks)
+            const sameSet = cloudIds.size === localIds.size && [...cloudIds].every(id => localIds.has(id))
+            if (!sameSet) {
+              const mergedPage = mergePages(cloudPage, localPage)
+              console.log(`iCloud sync: merging concurrent edits for ${cloudPage.id} (cloud=${cloudIds.size} local=${localIds.size} merged=${mergedPage.blocks.length})`)
+              await fs.promises.writeFile(localPath, JSON.stringify(mergedPage, null, 2))
+              syncPageToICloud(mergedPage)
+              merged.push(mergedPage)
+            } else if (cloudPage.updatedAt > localPage.updatedAt) {
               await fs.promises.writeFile(localPath, JSON.stringify(cloudPage, null, 2))
               merged.push(cloudPage)
-            } else {
-              // Cloud stub would destroy real local content → push local to cloud instead
-              console.log(`iCloud sync: keeping real local content for ${cloudPage.id} (cloud stub discarded)`)
+            } else if (localPage.updatedAt > cloudPage.updatedAt) {
               syncPageToICloud(localPage)
             }
           }
-          // Local page is newer → update cloud, BUT never push an empty stub over real cloud content.
-          // Mac's DailyNotesView eagerly creates empty stubs (updatedAt=now) for all visible days,
-          // which can have a newer timestamp than yesterday's real note from iPhone.
-          else if (localPage.updatedAt > cloudPage.updatedAt) {
-            const cloudHasContent = pageHasRealContent(cloudPage)
-            const localHasContent = pageHasRealContent(localPage)
-            if (cloudHasContent && !localHasContent) {
-              // Cloud has real data, local is an empty stub → accept cloud despite local being newer
-              await fs.promises.writeFile(localPath, JSON.stringify(cloudPage, null, 2))
-              merged.push(cloudPage)
-            } else {
-              syncPageToICloud(localPage)
-            }
-          }
+          // else: both empty → no-op
         } else {
           // New page from cloud → save locally (always accept, nothing to lose)
           await fs.promises.writeFile(localPath, JSON.stringify(cloudPage, null, 2))
