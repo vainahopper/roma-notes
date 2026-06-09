@@ -1,5 +1,6 @@
 import Foundation
 import Capacitor
+import UIKit
 
 /// Native Capacitor plugin for iCloud Documents sync + live web asset updates.
 /// Pages are stored as JSON files in the iCloud ubiquity container.
@@ -34,6 +35,19 @@ public class RomaCloudSyncPlugin: CAPPlugin, CAPBridgedPlugin {
     private let updateLock = NSLock()
     private var _checkInProgress = false
     private var _applyInProgress = false
+
+    // ─── Pending-upload tracking ─────────────────────────────────────────────
+    // iOS uploads ubiquity-container files to iCloud lazily via the `bird` daemon.
+    // We track every page we've written until iCloud confirms it as fully uploaded
+    // (NSMetadataUbiquitousItemIsUploadedKey). Unconfirmed pages are re-nudged on
+    // app launch / foreground so an aborted upload (no network, app killed, low
+    // power) eventually completes instead of silently staying on-device only.
+    private let pendingLock = NSLock()
+    private var pendingUploadIDs = Set<String>()
+    private var pendingLoaded = false
+    // Serializes verifyAndRetryPending so foreground + timer can't run two queries at once.
+    private let verifyLock = NSLock()
+    private var _verifyInProgress = false
 
     // ─── iCloud container helpers ────────────────────────────────────────────
 
@@ -168,13 +182,210 @@ public class RomaCloudSyncPlugin: CAPPlugin, CAPBridgedPlugin {
 
     // ─── Page sync ───────────────────────────────────────────────────────────
 
+    // ─── Lifecycle ───────────────────────────────────────────────────────────
+
+    override public func load() {
+        loadPendingIfNeeded()
+        // Re-verify pending uploads whenever the app comes to the foreground —
+        // this is where an upload that was interrupted (network/power/app kill)
+        // gets re-nudged until iCloud confirms it.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(appDidBecomeActive),
+            name: UIApplication.didBecomeActiveNotification,
+            object: nil
+        )
+        // Initial sweep shortly after launch (iCloud needs a moment to be ready).
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 5) { [weak self] in
+            self?.verifyAndRetryPending()
+        }
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    @objc private func appDidBecomeActive() {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            self?.verifyAndRetryPending()
+        }
+    }
+
+    // ─── Background-task helpers ──────────────────────────────────────────────
+    // beginBackgroundTask is documented as safe to call from any thread.
+
+    private func beginBackgroundTask(named name: String) -> UIBackgroundTaskIdentifier {
+        var taskID: UIBackgroundTaskIdentifier = .invalid
+        taskID = UIApplication.shared.beginBackgroundTask(withName: name) {
+            if taskID != .invalid {
+                UIApplication.shared.endBackgroundTask(taskID)
+                taskID = .invalid
+            }
+        }
+        return taskID
+    }
+
+    private func endBackgroundTask(_ id: UIBackgroundTaskIdentifier) {
+        if id != .invalid { UIApplication.shared.endBackgroundTask(id) }
+    }
+
+    // ─── Coordinated iCloud writes ────────────────────────────────────────────
+    // NSFileCoordinator is the documented way to write into a ubiquity container.
+    // A plain write can leave the file's sync state unregistered so iOS never
+    // uploads it — the root cause of "wrote on iPhone, never showed on Mac".
+
+    private func coordinatedWrite(_ contents: String, to url: URL) throws {
+        let coordinator = NSFileCoordinator(filePresenter: nil)
+        var coordError: NSError?
+        var writeError: Error?
+        coordinator.coordinate(writingItemAt: url, options: .forReplacing, error: &coordError) { newURL in
+            do { try contents.write(to: newURL, atomically: true, encoding: .utf8) }
+            catch { writeError = error }
+        }
+        if let e = coordError { throw e }
+        if let e = writeError { throw e }
+    }
+
+    private func coordinatedDelete(_ url: URL) {
+        let coordinator = NSFileCoordinator(filePresenter: nil)
+        var coordError: NSError?
+        coordinator.coordinate(writingItemAt: url, options: .forDeleting, error: &coordError) { newURL in
+            try? FileManager.default.removeItem(at: newURL)
+        }
+    }
+
+    // ─── Pending-upload persistence ───────────────────────────────────────────
+
+    private func pendingFileURL() -> URL {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return support.appendingPathComponent("pendingUploads.json")
+    }
+
+    private func loadPendingIfNeeded() {
+        pendingLock.lock(); defer { pendingLock.unlock() }
+        if pendingLoaded { return }
+        pendingLoaded = true
+        if let data = try? Data(contentsOf: pendingFileURL()),
+           let ids = try? JSONDecoder().decode([String].self, from: data) {
+            pendingUploadIDs = Set(ids)
+            NSLog("[RomaSync] pending: loaded %d unconfirmed uploads from disk", ids.count)
+        }
+    }
+
+    // Caller must hold pendingLock.
+    private func persistPendingLocked() {
+        let ids = Array(pendingUploadIDs)
+        if let data = try? JSONEncoder().encode(ids) {
+            try? data.write(to: pendingFileURL(), options: .atomic)
+        }
+    }
+
+    private func markPending(_ id: String) {
+        pendingLock.lock(); defer { pendingLock.unlock() }
+        pendingUploadIDs.insert(id)
+        persistPendingLocked()
+    }
+
+    private func clearPending(_ id: String) {
+        pendingLock.lock(); defer { pendingLock.unlock() }
+        if pendingUploadIDs.remove(id) != nil {
+            persistPendingLocked()
+        }
+    }
+
+    // ─── Upload verification + retry ──────────────────────────────────────────
+    // Runs an NSMetadataQuery over the pages folder, clears pending pages that
+    // iCloud confirms as uploaded, and re-writes (nudges) those that aren't yet.
+    // Re-writing identical bytes re-triggers iOS's upload without changing the
+    // page's in-JSON `updatedAt`, so the cross-device merge is unaffected.
+
+    private func verifyAndRetryPending() {
+        loadPendingIfNeeded()
+        pendingLock.lock()
+        let ids = pendingUploadIDs
+        pendingLock.unlock()
+        if ids.isEmpty { return }
+
+        verifyLock.lock()
+        if _verifyInProgress { verifyLock.unlock(); return }
+        _verifyInProgress = true
+        verifyLock.unlock()
+
+        guard getContainerURL() != nil else {
+            verifyLock.lock(); _verifyInProgress = false; verifyLock.unlock()
+            return
+        }
+        NSLog("[RomaSync] verifyPending: checking %d pending upload(s)", ids.count)
+
+        let pagesFolderSegment = "/\(self.pagesFolder)/"
+        // NSMetadataQuery must be driven from a thread with a run loop → main.
+        DispatchQueue.main.async {
+            let query = NSMetadataQuery()
+            query.searchScopes = [NSMetadataQueryUbiquitousDocumentsScope]
+            query.predicate = NSPredicate(format: "%K LIKE '*.json'", NSMetadataItemFSNameKey)
+
+            var observer: NSObjectProtocol?
+            observer = NotificationCenter.default.addObserver(
+                forName: .NSMetadataQueryDidFinishGathering,
+                object: query,
+                queue: .main
+            ) { [weak self, weak query] _ in
+                guard let self = self, let query = query else { return }
+                query.disableUpdates()
+
+                var uploadedIDs: [String] = []
+                var notUploadedPaths: [String] = []
+                for case let item as NSMetadataItem in query.results {
+                    guard let path = item.value(forAttribute: NSMetadataItemPathKey) as? String,
+                          path.contains(pagesFolderSegment),
+                          path.hasSuffix(".json") else { continue }
+                    let id = String((path as NSString).lastPathComponent.dropLast(5)) // strip ".json"
+                    guard ids.contains(id) else { continue }
+                    let uploaded = (item.value(forAttribute: NSMetadataUbiquitousItemIsUploadedKey) as? Bool) ?? false
+                    if uploaded { uploadedIDs.append(id) }
+                    else { notUploadedPaths.append(path) }
+                }
+
+                query.stop()
+                if let obs = observer {
+                    NotificationCenter.default.removeObserver(obs)
+                    observer = nil
+                }
+
+                // File I/O off the main thread.
+                DispatchQueue.global(qos: .utility).async {
+                    for id in uploadedIDs { self.clearPending(id) }
+                    for path in notUploadedPaths {
+                        let url = URL(fileURLWithPath: path)
+                        if let content = try? String(contentsOf: url, encoding: .utf8) {
+                            try? self.coordinatedWrite(content, to: url)
+                        }
+                    }
+                    NSLog("[RomaSync] verifyPending: confirmed %d uploaded, nudged %d",
+                          uploadedIDs.count, notUploadedPaths.count)
+                    self.verifyLock.lock(); self._verifyInProgress = false; self.verifyLock.unlock()
+                }
+            }
+
+            if !query.start() {
+                NSLog("[RomaSync] verifyPending: query.start() failed")
+                self.verifyLock.lock(); self._verifyInProgress = false; self.verifyLock.unlock()
+            }
+        }
+    }
+
     @objc func pushPage(_ call: CAPPluginCall) {
         guard let pageJson = call.getString("json"),
               let pageId = call.getString("id") else {
             call.reject("Missing 'id' or 'json' parameter")
             return
         }
+        // Hold a background task so a save started just before the user backgrounds
+        // the app still finishes registering the file with iCloud instead of being
+        // suspended mid-write (the exact case that loses data today).
+        let bgTask = self.beginBackgroundTask(named: "RomaPushPage")
         DispatchQueue.global(qos: .userInitiated).async {
+            defer { self.endBackgroundTask(bgTask) }
             guard let pagesURL = self.getPagesURL() else {
                 NSLog("[RomaSync] pushPage: iCloud not available for page %@", pageId)
                 call.reject("iCloud not available")
@@ -182,8 +393,9 @@ public class RomaCloudSyncPlugin: CAPPlugin, CAPBridgedPlugin {
             }
             let fileURL = pagesURL.appendingPathComponent("\(pageId).json")
             do {
-                try pageJson.write(to: fileURL, atomically: true, encoding: .utf8)
-                NSLog("[RomaSync] pushPage: wrote %@ (%d bytes)", pageId, pageJson.count)
+                try self.coordinatedWrite(pageJson, to: fileURL)
+                self.markPending(pageId)
+                NSLog("[RomaSync] pushPage: wrote %@ (%d bytes) [coordinated, pending upload]", pageId, pageJson.count)
                 call.resolve(["success": true])
             } catch {
                 NSLog("[RomaSync] pushPage: FAILED %@ — %@", pageId, error.localizedDescription)
@@ -301,7 +513,8 @@ public class RomaCloudSyncPlugin: CAPPlugin, CAPBridgedPlugin {
                 return
             }
             let fileURL = pagesURL.appendingPathComponent("\(pageId).json")
-            try? FileManager.default.removeItem(at: fileURL)
+            self.coordinatedDelete(fileURL)
+            self.clearPending(pageId)
             call.resolve(["success": true])
         }
     }

@@ -1,6 +1,6 @@
 {
   "name": "roma-notes",
-  "version": "1.7.137",
+  "version": "1.8.6",
   "description": "A Roam Research-inspired note-taking app for macOS",
   "main": "dist-electron/main.js",
   "scripts": {
