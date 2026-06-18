@@ -93,6 +93,16 @@ function blockIdSet(blocks) {
   return out
 }
 
+// Compare two pages ignoring only the page-level `updatedAt` (which the
+// merge bumps to now even when no content actually changed). Used to decide
+// whether the merged result is meaningfully different from either side —
+// if not, we skip the write/push to avoid ping-pong.
+function pagesEqualIgnoringPageTs(a, b) {
+  const stripA = { ...a }; delete stripA.updatedAt
+  const stripB = { ...b }; delete stripB.updatedAt
+  return JSON.stringify(stripA) === JSON.stringify(stripB)
+}
+
 function mergeBlock(a, b) {
   const aTs = a.updatedAt || ''
   const bTs = b.updatedAt || ''
@@ -132,60 +142,76 @@ function mergePages(cloudPage, localPage) {
 }
 
 /** Pull all pages from iCloud and merge with local. Returns pages that were newer in iCloud. */
+// Merge a SINGLE cloud file into its local counterpart (and push back if the
+// merge changed the cloud side). Returns the merged page if the local copy
+// changed, otherwise null. Extracted so the fs.watch handler can react to one
+// changed file in ~0.2ms instead of re-reading + re-parsing every page on disk
+// (the latter was this app's main energy drain — a full pull is ~5600 file
+// reads / ~7MB of JSON.parse, and iCloud's background churn fires the watcher
+// several times a second).
+async function syncCloudFile(file) {
+  try {
+    const cloudFilePath = path.join(ICLOUD_CONTAINER, file)
+    if (!fs.existsSync(cloudFilePath)) return null
+    const cloudPage = JSON.parse(await fs.promises.readFile(cloudFilePath, 'utf-8'))
+    if (!cloudPage.id) return null
+    const localPath = path.join(PAGES_DIR, `${sanitizeFilename(cloudPage.id)}.json`)
+    if (fs.existsSync(localPath)) {
+      const localPage = JSON.parse(await fs.promises.readFile(localPath, 'utf-8'))
+      const cloudHasContent = pageHasRealContent(cloudPage)
+      const localHasContent = pageHasRealContent(localPage)
+
+      // Empty-stub protection: a stub must never overwrite real content. Stubs
+      // come from a device opening a daily note before sync has completed.
+      if (cloudHasContent && !localHasContent) {
+        // Cloud has data, local is empty → accept cloud regardless of timestamp
+        await fs.promises.writeFile(localPath, JSON.stringify(cloudPage, null, 2))
+        return cloudPage
+      } else if (!cloudHasContent && localHasContent) {
+        // Cloud is empty, local has data → push local to cloud regardless of timestamp
+        console.log(`iCloud sync: keeping real local content for ${cloudPage.id} (cloud stub discarded)`)
+        syncPageToICloud(localPage)
+        return null
+      } else if (cloudHasContent && localHasContent) {
+        // Both sides have content → ALWAYS merge by block id, never replace the
+        // whole page. Catches the silent data-loss case where both devices kept
+        // the same block IDs but edited different blocks' content. To avoid
+        // ping-pong, skip the write to whichever side already byte-matches the
+        // merge (ignoring only page-level updatedAt, which the merge bumps).
+        const mergedPage = mergePages(cloudPage, localPage)
+        const sameAsLocal = pagesEqualIgnoringPageTs(mergedPage, localPage)
+        const sameAsCloud = pagesEqualIgnoringPageTs(mergedPage, cloudPage)
+        if (!sameAsLocal) {
+          await fs.promises.writeFile(localPath, JSON.stringify(mergedPage, null, 2))
+        }
+        if (!sameAsCloud) {
+          syncPageToICloud(mergedPage)
+        }
+        if (!sameAsLocal || !sameAsCloud) {
+          console.log(`iCloud sync: block-merged ${cloudPage.id} (writeLocal=${!sameAsLocal} pushCloud=${!sameAsCloud})`)
+        }
+        return sameAsLocal ? null : mergedPage
+      }
+      // else: both empty → no-op
+      return null
+    } else {
+      // New page from cloud → save locally (always accept, nothing to lose)
+      await fs.promises.writeFile(localPath, JSON.stringify(cloudPage, null, 2))
+      return cloudPage
+    }
+  } catch {
+    return null
+  }
+}
+
 async function pullFromICloud() {
   const merged = []
   try {
     if (!fs.existsSync(ICLOUD_CONTAINER)) return merged
     const cloudFiles = (await fs.promises.readdir(ICLOUD_CONTAINER)).filter(f => f.endsWith('.json'))
     for (const file of cloudFiles) {
-      try {
-        const cloudPage = JSON.parse(await fs.promises.readFile(path.join(ICLOUD_CONTAINER, file), 'utf-8'))
-        if (!cloudPage.id) continue
-        const localPath = path.join(PAGES_DIR, `${sanitizeFilename(cloudPage.id)}.json`)
-        if (fs.existsSync(localPath)) {
-          const localPage = JSON.parse(await fs.promises.readFile(localPath, 'utf-8'))
-          const cloudHasContent = pageHasRealContent(cloudPage)
-          const localHasContent = pageHasRealContent(localPage)
-
-          // Empty-stub protection (kept from the prior implementation): a stub must
-          // never overwrite real content. Stubs come from a device opening a daily
-          // note before sync has completed.
-          if (cloudHasContent && !localHasContent) {
-            // Cloud has data, local is empty → accept cloud regardless of timestamp
-            await fs.promises.writeFile(localPath, JSON.stringify(cloudPage, null, 2))
-            merged.push(cloudPage)
-          } else if (!cloudHasContent && localHasContent) {
-            // Cloud is empty, local has data → push local to cloud regardless of timestamp
-            console.log(`iCloud sync: keeping real local content for ${cloudPage.id} (cloud stub discarded)`)
-            syncPageToICloud(localPage)
-          } else if (cloudHasContent && localHasContent) {
-            // Both sides have content. If the block sets differ, this is a concurrent
-            // edit (e.g. Mac wrote A,B while iPhone wrote C) → merge by block id so
-            // nothing is lost. If the block sets are identical, fall back to
-            // last-write-wins on the page (cheap path, no ping-pong).
-            const cloudIds = blockIdSet(cloudPage.blocks)
-            const localIds = blockIdSet(localPage.blocks)
-            const sameSet = cloudIds.size === localIds.size && [...cloudIds].every(id => localIds.has(id))
-            if (!sameSet) {
-              const mergedPage = mergePages(cloudPage, localPage)
-              console.log(`iCloud sync: merging concurrent edits for ${cloudPage.id} (cloud=${cloudIds.size} local=${localIds.size} merged=${mergedPage.blocks.length})`)
-              await fs.promises.writeFile(localPath, JSON.stringify(mergedPage, null, 2))
-              syncPageToICloud(mergedPage)
-              merged.push(mergedPage)
-            } else if (cloudPage.updatedAt > localPage.updatedAt) {
-              await fs.promises.writeFile(localPath, JSON.stringify(cloudPage, null, 2))
-              merged.push(cloudPage)
-            } else if (localPage.updatedAt > cloudPage.updatedAt) {
-              syncPageToICloud(localPage)
-            }
-          }
-          // else: both empty → no-op
-        } else {
-          // New page from cloud → save locally (always accept, nothing to lose)
-          await fs.promises.writeFile(localPath, JSON.stringify(cloudPage, null, 2))
-          merged.push(cloudPage)
-        }
-      } catch {}
+      const m = await syncCloudFile(file)
+      if (m) merged.push(m)
     }
     // Also push local pages that don't exist in cloud
     const localFiles = (await fs.promises.readdir(PAGES_DIR)).filter(f => f.endsWith('.json'))
@@ -496,7 +522,10 @@ function createWindow() {
     minHeight: 600,
     titleBarStyle: 'hiddenInset',
     vibrancy: 'sidebar',
-    visualEffectState: 'active',
+    // 'followWindow' (the default) lets macOS stop re-sampling the vibrancy blur
+    // when the app isn't frontmost — saves GPU/energy in the background and is the
+    // native look (sidebar dims when unfocused). 'active' forced live blur always.
+    visualEffectState: 'followWindow',
     backgroundColor: '#00000000',
     trafficLightPosition: { x: 16, y: 16 },
     webPreferences: {
@@ -523,39 +552,95 @@ function createWindow() {
     win.loadFile(path.join(__dirname, '../dist/index.html'))
   }
 
+  // Timers/watchers that must be torn down when the window closes, otherwise
+  // they keep firing in a windowless background process and burn energy even
+  // though the user thinks the app is "closed".
+  const startupTimers = []
+  let updateTimer = null
+  let iCloudWatcher = null
+
   // Check for updates silently on startup (after 3 seconds),
   // then keep polling every 10 minutes while the app is open
   if (!isDev) {
-    setTimeout(() => checkForUpdates(win, true), 3000)
-    setInterval(() => checkForUpdates(win, true), 10 * 60 * 1000)
+    startupTimers.push(setTimeout(() => checkForUpdates(win, true), 3000))
+    updateTimer = setInterval(() => checkForUpdates(win, true), 10 * 60 * 1000)
   }
 
-  // iCloud sync: pull on startup (after 2s), then every 30s, and on focus
+  // iCloud sync: pull on startup (after 2s) and on focus. While the window is
+  // focused we poll every 30s. While it's in the background, fs.watch (below)
+  // and the focus handler already deliver iPhone changes, so we drop to a slow
+  // 5-min safety-net poll. This lets macOS idle the app (App Nap) instead of
+  // waking the CPU twice a minute to scan + parse every page — the main source
+  // of this app's energy impact when it just sits open in the background.
+  // Full pull over every page. Guarded so the 30s/focus timers can't stack
+  // overlapping O(all-pages) scans on top of each other (each scan reads +
+  // parses thousands of JSON files and would otherwise pile up under churn).
+  let fullPullInFlight = false
   const doSyncPull = async () => {
-    const merged = await pullFromICloud()
-    if (merged.length > 0) {
-      try { win.webContents.send('sync:updated') } catch {}
+    if (fullPullInFlight) return
+    fullPullInFlight = true
+    try {
+      const merged = await pullFromICloud()
+      if (merged.length > 0) {
+        try { win.webContents.send('sync:updated') } catch {}
+      }
+    } finally {
+      fullPullInFlight = false
     }
   }
-  setTimeout(doSyncPull, 2000)
-  setInterval(doSyncPull, 30 * 1000)
-  win.on('focus', doSyncPull)
+  let syncTimer = null
+  const FOCUSED_SYNC_MS = 30 * 1000
+  const BACKGROUND_SYNC_MS = 5 * 60 * 1000
+  const rescheduleSync = () => {
+    if (syncTimer) clearInterval(syncTimer)
+    syncTimer = setInterval(doSyncPull, win.isFocused() ? FOCUSED_SYNC_MS : BACKGROUND_SYNC_MS)
+  }
+  startupTimers.push(setTimeout(() => { doSyncPull(); rescheduleSync() }, 2000))
+  win.on('focus', () => { doSyncPull(); rescheduleSync() })
+  win.on('blur', rescheduleSync)
 
   // Watch iCloud pages folder for instant detection of iPhone changes.
   // fs.watch fires the moment iCloud downloads a file locally — no polling needed.
+  // CRITICAL for energy: react to ONLY the files that actually changed. iCloud's
+  // background daemon touches individual page files several times a second; the
+  // old handler ran a full pull (re-reading + parsing every page on disk, ~310ms
+  // of CPU) on each event, which pinned the main process near 100% indefinitely.
+  // We coalesce the changed filenames and merge just those — ~0.2ms per file.
   let watchDebounce = null
+  const pendingFiles = new Set()
   const startICloudWatch = () => {
     if (!fs.existsSync(ICLOUD_CONTAINER)) return
     try {
-      fs.watch(ICLOUD_CONTAINER, { persistent: false }, (eventType, filename) => {
+      iCloudWatcher = fs.watch(ICLOUD_CONTAINER, { persistent: false }, (eventType, filename) => {
         if (!filename || !filename.endsWith('.json')) return
+        pendingFiles.add(filename)
         clearTimeout(watchDebounce)
-        watchDebounce = setTimeout(doSyncPull, 400)
+        watchDebounce = setTimeout(async () => {
+          const files = [...pendingFiles]
+          pendingFiles.clear()
+          let changed = 0
+          for (const f of files) {
+            if (await syncCloudFile(f)) changed++
+          }
+          if (changed > 0) {
+            try { win.webContents.send('sync:updated') } catch {}
+          }
+        }, 500)
       })
     } catch {}
   }
   // Start watching after initial pull (gives iCloud time to create the folder)
-  setTimeout(startICloudWatch, 3000)
+  startupTimers.push(setTimeout(startICloudWatch, 3000))
+
+  // Tear down every timer/watcher when the window closes so a backgrounded
+  // process can't keep waking the CPU and the iCloud file watcher.
+  win.on('closed', () => {
+    startupTimers.forEach(clearTimeout)
+    if (updateTimer) clearInterval(updateTimer)
+    if (syncTimer) clearInterval(syncTimer)
+    if (watchDebounce) clearTimeout(watchDebounce)
+    if (iCloudWatcher) { try { iCloudWatcher.close() } catch {} }
+  })
 
   // Set up native menu
   const template = [
@@ -674,7 +759,12 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit()
+  // Quit fully on every platform — including macOS. The standard mac pattern is
+  // to keep the app resident after the last window closes, but this app has no
+  // tray UI and runs background timers + an fs.watch, so a "closed" window left a
+  // windowless process burning energy. Closing the window now ends the process;
+  // the dock icon relaunches it (and `activate` recreates the window).
+  app.quit()
 })
 
 // ─── IPC Handlers ───────────────────────────────────────────────────────────
