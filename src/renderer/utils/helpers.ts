@@ -177,10 +177,14 @@ export function findBlocksWithLink(blocks: Block[], titleLower: string, idLower:
  * `editedSubtree[0]` is the edited matched block (id === matchBlockId in the
  * normal case — BlockEditor's guards prevent it being deleted or outdented past
  * root). `editedSubtree[1..]` are new sibling blocks the user created (Enter /
- * Shift+Tab) and are inserted immediately after the matched node.
+ * Shift+Tab); they replace the matched node's position.
  *
- * Fallback: if `editedSubtree[0].id !== matchBlockId`, the matched node's
- * position is replaced by the entire `editedSubtree`.
+ * Idempotent: any block whose id already appears anywhere in `editedSubtree`
+ * (e.g. a sibling inserted by an earlier save of the same editing session) is
+ * removed from its old spot, so re-running the splice with the same subtree —
+ * which happens because the debounced save and the on-blur flush both fire —
+ * does not duplicate the new siblings.
+ *
  * If the matched id is not found, the input is returned unchanged.
  */
 export function spliceSubtreeIntoPage(
@@ -189,6 +193,10 @@ export function spliceSubtreeIntoPage(
   editedSubtree: Block[],
 ): Block[] {
   if (!editedSubtree || editedSubtree.length === 0) return pageBlocks
+  const editedIds = new Set<string>()
+  const collect = (b: Block) => { editedIds.add(b.id); b.children?.forEach(collect) }
+  editedSubtree.forEach(collect)
+
   let found = false
   function walk(list: Block[]): Block[] {
     const out: Block[] = []
@@ -196,6 +204,9 @@ export function spliceSubtreeIntoPage(
       if (b.id === matchBlockId) {
         found = true
         for (const r of editedSubtree) out.push(r)
+      } else if (editedIds.has(b.id)) {
+        // Stale copy of a block the edited subtree now owns — drop it.
+        continue
       } else {
         out.push({ ...b, children: walk(b.children ?? []) })
       }

@@ -4,15 +4,19 @@
 
 function spliceSubtreeIntoPage(pageBlocks, matchBlockId, editedSubtree) {
   if (!editedSubtree || editedSubtree.length === 0) return pageBlocks
-  const rootMatches = editedSubtree[0] && editedSubtree[0].id === matchBlockId
-  const replacement = rootMatches ? editedSubtree : editedSubtree
+  const editedIds = new Set()
+  const collect = (b) => { editedIds.add(b.id); (b.children || []).forEach(collect) }
+  editedSubtree.forEach(collect)
+
   let found = false
   function walk(list) {
     const out = []
     for (const b of list) {
       if (b.id === matchBlockId) {
         found = true
-        for (const r of replacement) out.push(r)
+        for (const r of editedSubtree) out.push(r)
+      } else if (editedIds.has(b.id)) {
+        continue
       } else {
         out.push({ ...b, children: walk(b.children || []) })
       }
@@ -61,6 +65,25 @@ test('fallback: edited[0] is not the matched id → replace position with whole 
   const edited = [blk('X', 'x'), blk('Y', 'y')]
   const out = spliceSubtreeIntoPage(page, 'M', edited)
   eq(out.map(b => b.id), ['X', 'Y'])
+})
+
+test('idempotent: re-splicing the same subtree does not duplicate new siblings', () => {
+  const page = [blk('A', 'a'), blk('M', 'm'), blk('B', 'b')]
+  const edited = [blk('M', 'm-edited'), blk('N', 'new bullet')]
+  const once = spliceSubtreeIntoPage(page, 'M', edited)
+  eq(once.map(b => b.id), ['A', 'M', 'N', 'B'])
+  const twice = spliceSubtreeIntoPage(once, 'M', edited)
+  eq(twice.map(b => b.id), ['A', 'M', 'N', 'B'])
+  eq(twice, once)
+})
+
+test('idempotent with nested new child across re-splice', () => {
+  const page = [blk('M', 'm')]
+  const edited = [blk('M', 'm', [blk('K', 'kid')])]
+  const once = spliceSubtreeIntoPage(page, 'M', edited)
+  const twice = spliceSubtreeIntoPage(once, 'M', edited)
+  eq(twice, once)
+  eq(twice[0].children.map(b => b.id), ['K'])
 })
 
 test('matched id absent → input returned unchanged', () => {
