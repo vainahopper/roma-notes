@@ -165,6 +165,42 @@ export function findBlocksWithLink(blocks: Block[], titleLower: string, idLower:
   return results
 }
 
+/**
+ * Reinsert an edited block subtree (from the references panel's scoped editor)
+ * back into a page's block tree.
+ *
+ * `editedSubtree[0]` is the edited matched block (id === matchBlockId in the
+ * normal case — BlockEditor's guards prevent it being deleted or outdented past
+ * root). `editedSubtree[1..]` are new sibling blocks the user created (Enter /
+ * Shift+Tab) and are inserted immediately after the matched node.
+ *
+ * Fallback: if `editedSubtree[0].id !== matchBlockId`, the matched node's
+ * position is replaced by the entire `editedSubtree`.
+ * If the matched id is not found, the input is returned unchanged.
+ */
+export function spliceSubtreeIntoPage(
+  pageBlocks: Block[],
+  matchBlockId: string,
+  editedSubtree: Block[],
+): Block[] {
+  if (!editedSubtree || editedSubtree.length === 0) return pageBlocks
+  let found = false
+  function walk(list: Block[]): Block[] {
+    const out: Block[] = []
+    for (const b of list) {
+      if (b.id === matchBlockId) {
+        found = true
+        for (const r of editedSubtree) out.push(r)
+      } else {
+        out.push({ ...b, children: walk(b.children ?? []) })
+      }
+    }
+    return out
+  }
+  const result = walk(pageBlocks)
+  return found ? result : pageBlocks
+}
+
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }

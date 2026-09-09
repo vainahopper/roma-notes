@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && NODE_ENV=development electron .\"",
     "start": "npm run build && electron .",
+    "test": "node scripts/test-merge.js && node scripts/test-icloud-sync.js && node scripts/test-reference-splice.js",
     "build": "vite build && node build-electron.js",
     "dist": "npm run build && electron-builder --mac dmg --arm64 && node post-dist.js",
     "pack": "npm run build && electron-builder --dir",
