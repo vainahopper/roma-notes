@@ -3,7 +3,7 @@ import type { Page, Block } from '../../shared/types'
 import { BlockEditor } from './BlockEditor'
 import { LinkedReferences } from './LinkedReferences'
 import { savePage, getOrCreateDailyPage, createNewPage } from '../stores/useStore'
-import { generateId, dateToPageId, dateToPageTitle, parseDatePage, findBlocksWithLink } from '../utils/helpers'
+import { generateId, dateToPageId, dateToPageTitle, parseDatePage, findBlocksWithLink, spliceSubtreeIntoPage } from '../utils/helpers'
 
 // Sort backlink pages: daily notes by actual date, others by updatedAt. Newest first.
 function sortByPageDate(a: { page: Page }, b: { page: Page }): number {
@@ -281,15 +281,10 @@ function DayEntry({ page, allPages, pagesVersion, onNavigate, onOpenSidebar, onZ
     savePage({ ...target, blocks: updateBlock(target.blocks) })
   }, [allPages])
 
-  const handleEditBlock = useCallback((pageId: string, blockId: string, content: string) => {
+  const handleSaveRefSubtree = useCallback((pageId: string, matchBlockId: string, editedSubtree: Block[]) => {
     const target = allPages.get(pageId)
     if (!target) return
-    function update(bs: Block[]): Block[] {
-      return bs.map(b => b.id === blockId
-        ? { ...b, content, updatedAt: new Date().toISOString() }
-        : { ...b, children: update(b.children) })
-    }
-    savePage({ ...target, blocks: update(target.blocks) })
+    savePage({ ...target, blocks: spliceSubtreeIntoPage(target.blocks, matchBlockId, editedSubtree), updatedAt: new Date().toISOString() })
   }, [allPages])
 
   const date = parseDatePage(page.id)
@@ -330,7 +325,7 @@ function DayEntry({ page, allPages, pagesVersion, onNavigate, onOpenSidebar, onZ
             onNavigateToBlock={onZoomToBlock}
             onToggleBlock={handleToggleTodo}
             onToggleTodoMarker={handleToggleTodoMarker}
-            onEditBlock={handleEditBlock}
+            onSaveRefSubtree={handleSaveRefSubtree}
             title="Linked References"
           />
         </div>

@@ -4,7 +4,7 @@ import { BlockEditor } from './BlockEditor'
 import { BlockContent } from './BlockContent'
 import { LinkedReferences } from './LinkedReferences'
 import { savePage, deletePage, createNewPage, useStore } from '../stores/useStore'
-import { isDatePage, parseDatePage, findBlocksWithLink, extractAttributes, type BlockMatch } from '../utils/helpers'
+import { isDatePage, parseDatePage, findBlocksWithLink, extractAttributes, spliceSubtreeIntoPage, type BlockMatch } from '../utils/helpers'
 
 // Sort pages so daily notes appear in chronological order (by their actual date),
 // and regular pages sort by createdAt.  Newest first.
@@ -156,16 +156,11 @@ export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDele
     savePage({ ...targetPage, blocks: updateBlock(targetPage.blocks) })
   }, [allPages])
 
-  const handleEditBacklinkBlock = useCallback((pageId: string, blockId: string, content: string) => {
+  const handleSaveRefSubtree = useCallback((pageId: string, matchBlockId: string, editedSubtree: Block[]) => {
     const targetPage = allPages.get(pageId)
     if (!targetPage) return
-    function updateBlockContent(blist: Block[]): Block[] {
-      return blist.map(b => {
-        if (b.id === blockId) return { ...b, content, updatedAt: new Date().toISOString() }
-        return { ...b, children: updateBlockContent(b.children) }
-      })
-    }
-    savePage({ ...targetPage, blocks: updateBlockContent(targetPage.blocks) })
+    const newBlocks = spliceSubtreeIntoPage(targetPage.blocks, matchBlockId, editedSubtree)
+    savePage({ ...targetPage, blocks: newBlocks, updatedAt: new Date().toISOString() })
   }, [allPages])
 
   // Toggle the checked state of the currently-zoomed TODO block (from the zoom hero)
@@ -415,7 +410,7 @@ export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDele
             onNavigateToBlock={onNavigateToBlock}
             onToggleBlock={handleToggleBacklinkTodo}
             onToggleTodoMarker={handleToggleTodoMarker}
-            onEditBlock={handleEditBacklinkBlock}
+            onSaveRefSubtree={handleSaveRefSubtree}
             title="All To-dos"
             prominentPageTitle
           />
@@ -430,7 +425,7 @@ export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDele
             onNavigateToBlock={onNavigateToBlock}
             onToggleBlock={handleToggleBacklinkTodo}
             onToggleTodoMarker={handleToggleTodoMarker}
-            onEditBlock={handleEditBacklinkBlock}
+            onSaveRefSubtree={handleSaveRefSubtree}
             title="All Done"
             prominentPageTitle
           />
@@ -445,7 +440,7 @@ export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDele
             onNavigateToBlock={onNavigateToBlock}
             onToggleBlock={handleToggleBacklinkTodo}
             onToggleTodoMarker={handleToggleTodoMarker}
-            onEditBlock={handleEditBacklinkBlock}
+            onSaveRefSubtree={handleSaveRefSubtree}
             title="Linked References"
           />
         )}
@@ -459,7 +454,7 @@ export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDele
             onNavigateToBlock={onNavigateToBlock}
             onToggleBlock={handleToggleBacklinkTodo}
             onToggleTodoMarker={handleToggleTodoMarker}
-            onEditBlock={handleEditBacklinkBlock}
+            onSaveRefSubtree={handleSaveRefSubtree}
             title="Unlinked References"
             onLinkAll={handleLinkAll}
           />
