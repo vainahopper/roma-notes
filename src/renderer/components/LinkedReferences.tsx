@@ -1,6 +1,7 @@
-import React, { useState, useRef, useCallback } from 'react'
+import React, { useState, useCallback } from 'react'
 import type { Page, Block } from '../../shared/types'
 import { BlockContent } from './BlockContent'
+import { ReferenceBlockEditor } from './ReferenceBlockEditor'
 import type { BlockMatch } from '../utils/helpers'
 import './LinkedReferences.css'
 
@@ -16,14 +17,14 @@ interface Props {
   onNavigateToBlock?: (pageId: string, pageTitle: string, blockId: string) => void
   onToggleBlock?: (pageId: string, blockId: string) => void
   onToggleTodoMarker?: (pageId: string, blockId: string) => void
-  onEditBlock?: (pageId: string, blockId: string, content: string) => void
+  onSaveRefSubtree?: (pageId: string, matchBlockId: string, editedSubtree: Block[]) => void
   title?: string
   onLinkAll?: () => void
   /** When true, render each source page/day as a large prominent header (TODO page) */
   prominentPageTitle?: boolean
 }
 
-export function LinkedReferences({ backlinks, allPages, onNavigate, onNavigateToBlock, onToggleBlock, onToggleTodoMarker, onEditBlock, title = 'Linked References', onLinkAll, prominentPageTitle = false }: Props) {
+export function LinkedReferences({ backlinks, allPages, onNavigate, onNavigateToBlock, onToggleBlock, onToggleTodoMarker, onSaveRefSubtree, title = 'Linked References', onLinkAll, prominentPageTitle = false }: Props) {
   const [open, setOpen] = useState(true)
 
   return (
@@ -58,7 +59,7 @@ export function LinkedReferences({ backlinks, allPages, onNavigate, onNavigateTo
               onNavigateToBlock={onNavigateToBlock}
               onToggleBlock={onToggleBlock}
               onToggleTodoMarker={onToggleTodoMarker}
-              onEditBlock={onEditBlock}
+              onSaveRefSubtree={onSaveRefSubtree}
               prominentPageTitle={prominentPageTitle}
             />
           ))}
@@ -69,7 +70,7 @@ export function LinkedReferences({ backlinks, allPages, onNavigate, onNavigateTo
 }
 
 function BacklinkItem({
-  page, matches, allPages, onNavigate, onNavigateToBlock, onToggleBlock, onToggleTodoMarker, onEditBlock, prominentPageTitle,
+  page, matches, allPages, onNavigate, onNavigateToBlock, onToggleBlock, onToggleTodoMarker, onSaveRefSubtree, prominentPageTitle,
 }: {
   page: Page
   matches: BlockMatch[]
@@ -78,7 +79,7 @@ function BacklinkItem({
   onNavigateToBlock?: (pageId: string, pageTitle: string, blockId: string) => void
   onToggleBlock?: (pageId: string, blockId: string) => void
   onToggleTodoMarker?: (pageId: string, blockId: string) => void
-  onEditBlock?: (pageId: string, blockId: string, content: string) => void
+  onSaveRefSubtree?: (pageId: string, matchBlockId: string, editedSubtree: Block[]) => void
   prominentPageTitle?: boolean
 }) {
   const [open, setOpen] = useState(true)
@@ -121,7 +122,7 @@ function BacklinkItem({
               onNavigateToBlock={onNavigateToBlock}
               onToggleBlock={onToggleBlock}
               onToggleTodoMarker={onToggleTodoMarker}
-              onEditBlock={onEditBlock}
+              onSaveRefSubtree={onSaveRefSubtree}
             />
           ))}
         </div>
@@ -131,7 +132,7 @@ function BacklinkItem({
 }
 
 function BacklinkMatch({
-  match, page, allPages, onNavigate, onNavigateToBlock, onToggleBlock, onToggleTodoMarker, onEditBlock,
+  match, page, allPages, onNavigate, onNavigateToBlock, onToggleBlock, onToggleTodoMarker, onSaveRefSubtree,
 }: {
   match: BlockMatch
   page: Page
@@ -140,7 +141,7 @@ function BacklinkMatch({
   onNavigateToBlock?: (pageId: string, pageTitle: string, blockId: string) => void
   onToggleBlock?: (pageId: string, blockId: string) => void
   onToggleTodoMarker?: (pageId: string, blockId: string) => void
-  onEditBlock?: (pageId: string, blockId: string, content: string) => void
+  onSaveRefSubtree?: (pageId: string, matchBlockId: string, editedSubtree: Block[]) => void
 }) {
   const { block, parents } = match
   const handleParentClick = (parent: Block) => {
@@ -180,7 +181,7 @@ function BacklinkMatch({
           onNavigateToBlock={onNavigateToBlock}
           onToggleBlock={onToggleBlock}
           onToggleTodoMarker={onToggleTodoMarker}
-          onEditBlock={onEditBlock}
+          onSaveRefSubtree={onSaveRefSubtree}
           initiallyExpanded
         />
       </div>
@@ -192,7 +193,7 @@ const TODO_RE = /\{\{\[\[TODO\]\]\}\}/i
 const DONE_RE = /\{\{\[\[DONE\]\]\}\}/i
 
 function BacklinkBlock({
-  block, page, allPages, onNavigate, onNavigateToBlock, onToggleBlock, onToggleTodoMarker, onEditBlock, initiallyExpanded,
+  block, page, allPages, onNavigate, onNavigateToBlock, onToggleBlock, onToggleTodoMarker, onSaveRefSubtree, initiallyExpanded,
 }: {
   block: Block
   page: Page
@@ -201,34 +202,12 @@ function BacklinkBlock({
   onNavigateToBlock?: (pageId: string, pageTitle: string, blockId: string) => void
   onToggleBlock?: (pageId: string, blockId: string) => void
   onToggleTodoMarker?: (pageId: string, blockId: string) => void
-  onEditBlock?: (pageId: string, blockId: string, content: string) => void
+  onSaveRefSubtree?: (pageId: string, matchBlockId: string, editedSubtree: Block[]) => void
   initiallyExpanded?: boolean
 }) {
   const [expanded, setExpanded] = useState(initiallyExpanded ?? false)
-  const [editing, setEditing] = useState(false)
-  const [editValue, setEditValue] = useState(block.content)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [editingHere, setEditingHere] = useState(false)
   const hasChildren = block.children.length > 0
-
-  React.useEffect(() => {
-    if (!editing) setEditValue(block.content)
-  }, [block.content, editing])
-
-  const autoResize = useCallback(() => {
-    const ta = textareaRef.current
-    if (!ta) return
-    ta.style.height = 'auto'
-    ta.style.height = ta.scrollHeight + 'px'
-  }, [])
-
-  React.useEffect(() => {
-    if (editing) {
-      autoResize()
-      textareaRef.current?.focus()
-      const len = editValue.length
-      textareaRef.current?.setSelectionRange(len, len)
-    }
-  }, [editing]) // eslint-disable-line react-hooks/exhaustive-deps
 
   let effectiveChecked = block.checked
   if (effectiveChecked === null || effectiveChecked === undefined) {
@@ -251,38 +230,13 @@ function BacklinkBlock({
   }
 
   const handleContentClick = () => {
-    if (!onEditBlock) return
-    setEditing(true)
-    setEditValue(block.content)
-  }
-
-  const handleBlur = () => {
-    setEditing(false)
-    if (editValue !== block.content) {
-      onEditBlock?.(page.id, block.id, editValue)
-    }
-  }
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault()
-      setEditing(false)
-      onToggleTodoMarker?.(page.id, block.id)
-      return
-    }
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      textareaRef.current?.blur()
-    }
-    if (e.key === 'Escape') {
-      setEditValue(block.content)
-      setEditing(false)
-    }
+    if (!onSaveRefSubtree) return
+    setEditingHere(true)
   }
 
   const handleSliderChange = useCallback((newContent: string) => {
-    onEditBlock?.(page.id, block.id, newContent)
-  }, [onEditBlock, page.id, block.id])
+    onSaveRefSubtree?.(page.id, block.id, [{ ...block, content: newContent }])
+  }, [onSaveRefSubtree, page.id, block])
 
   return (
     <div className="backlink-block-row">
@@ -338,20 +292,21 @@ function BacklinkBlock({
           )}
         </div>
 
-        {editing ? (
-          <textarea
-            ref={textareaRef}
-            className={`backlink-edit-textarea${isTodo && effectiveChecked ? ' done-text' : ''}`}
-            value={editValue}
-            onChange={e => { setEditValue(e.target.value); autoResize() }}
-            onBlur={handleBlur}
-            onKeyDown={handleKeyDown}
+        {editingHere && onSaveRefSubtree ? (
+          <ReferenceBlockEditor
+            targetPage={page}
+            matchBlockId={block.id}
+            allPages={allPages}
+            onNavigate={onNavigate}
+            onNavigateToBlock={onNavigateToBlock}
+            onSaveRefSubtree={onSaveRefSubtree}
+            onDone={() => setEditingHere(false)}
           />
         ) : (
           <div
-            className={`backlink-content${isTodo && effectiveChecked ? ' done-text' : ''}${onEditBlock ? ' backlink-content-editable' : ''}`}
+            className={`backlink-content${isTodo && effectiveChecked ? ' done-text' : ''}${onSaveRefSubtree ? ' backlink-content-editable' : ''}`}
             onClick={handleContentClick}
-            title={onEditBlock ? 'Click to edit' : undefined}
+            title={onSaveRefSubtree ? 'Click to edit' : undefined}
           >
             <BlockContent
               content={displayContent}
@@ -359,7 +314,7 @@ function BacklinkBlock({
               allPages={allPages}
               onNavigate={onNavigate}
               onOpenSidebar={() => {}}
-              onSliderChange={onEditBlock ? handleSliderChange : undefined}
+              onSliderChange={onSaveRefSubtree ? handleSliderChange : undefined}
             />
           </div>
         )}
@@ -377,7 +332,7 @@ function BacklinkBlock({
               onNavigateToBlock={onNavigateToBlock}
               onToggleBlock={onToggleBlock}
               onToggleTodoMarker={onToggleTodoMarker}
-              onEditBlock={onEditBlock}
+              onSaveRefSubtree={onSaveRefSubtree}
             />
           ))}
         </div>
