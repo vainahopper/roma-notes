@@ -320,7 +320,7 @@ function BacklinkBlock({
         )}
       </div>
 
-      {expanded && hasChildren && (
+      {expanded && hasChildren && !editingHere && (
         <div className="backlink-children">
           {block.children.map(child => (
             <BacklinkBlock
