@@ -3,9 +3,10 @@
   display: flex;
   align-items: center;
   padding: 0 16px;
+  /* --bg-glass is 85–92% opaque and native macOS vibrancy already sits under the
+     window, so a CSS backdrop-filter here added continuous GPU compositing for a
+     blur that's barely visible. Dropped it to cut idle energy use. */
   background: var(--bg-glass);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
   border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
   position: relative;

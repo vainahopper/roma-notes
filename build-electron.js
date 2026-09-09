@@ -10,6 +10,8 @@ if (!fs.existsSync('dist-electron')) {
 // Copy main process files
 fs.copyFileSync(path.join('src', 'main', 'index.js'), path.join('dist-electron', 'main.js'))
 fs.copyFileSync(path.join('src', 'main', 'preload.js'), path.join('dist-electron', 'preload.js'))
+// main.js requires './icloud-sync' — must sit next to it in dist-electron
+fs.copyFileSync(path.join('src', 'main', 'icloud-sync.js'), path.join('dist-electron', 'icloud-sync.js'))
 
 // Compile Touch ID helper (Swift → binary)
 try {

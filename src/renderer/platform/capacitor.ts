@@ -82,6 +82,24 @@ const DEFAULT_SETTINGS: AppSettings & Record<string, any> = {
 // ─── Adapter ────────────────────────────────────────────────────────────────
 
 /**
+ * Filename used for a page inside the shared iCloud container.
+ *
+ * MUST stay byte-identical to `sanitizeFilename()` in src/main/index.js — the
+ * Mac and the iPhone write into the same folder, and the filename is the only
+ * thing that pairs the two copies of a page. When they disagreed (the iPhone
+ * used to send the raw page id), a title containing : " ? / \ | * < > produced
+ * two files for one page — `fintech 2025: the next wave.json` from the iPhone
+ * and `fintech 2025_ the next wave.json` from the Mac — which never converged,
+ * so edits made on one device were invisible on the other.
+ *
+ * Only the *filename* is sanitized. `page.id` inside the JSON stays raw, and
+ * both platforms always read the id from the JSON body, never from the name.
+ */
+function cloudFileId(id: string): string {
+  return id.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').substring(0, 200)
+}
+
+/**
  * Capacitor platform adapter.
  * Uses IndexedDB for local page/settings storage.
  * Face ID via @aparajita/capacitor-biometric-auth.
@@ -110,7 +128,7 @@ export function createCapacitorAdapter(): PlatformAdapter {
       try {
         const plugin = (window as any).Capacitor?.Plugins?.RomaCloudSync
         if (plugin) {
-          await plugin.pushPage({ id: page.id, json: JSON.stringify(page) })
+          await plugin.pushPage({ id: cloudFileId(page.id), json: JSON.stringify(page) })
         }
       } catch (e) {
         console.warn('[Roma] iCloud pushPage failed:', page.id, e)
@@ -123,7 +141,7 @@ export function createCapacitorAdapter(): PlatformAdapter {
       // Mirror to iCloud (best-effort)
       try {
         const plugin = (window as any).Capacitor?.Plugins?.RomaCloudSync
-        if (plugin) await plugin.deletePage({ id })
+        if (plugin) await plugin.deletePage({ id: cloudFileId(id) })
       } catch (e) {
         console.warn('[Roma] iCloud deletePage failed:', id, e)
       }
@@ -315,6 +333,14 @@ export function createCapacitorAdapter(): PlatformAdapter {
             updatedAt: new Date().toISOString(),
           }
         }
+        // Compare two pages ignoring only the page-level `updatedAt` (the merge
+        // always bumps it). Used to skip writes when the merged result is
+        // byte-identical to one or both sides — prevents ping-pong.
+        function pagesEqualIgnoringPageTs(a: Page, b: Page): boolean {
+          const stripA: any = { ...a }; delete stripA.updatedAt
+          const stripB: any = { ...b }; delete stripB.updatedAt
+          return JSON.stringify(stripA) === JSON.stringify(stripB)
+        }
 
         // Merge with local IndexedDB — content always beats no-content regardless of timestamp.
         // This prevents the "empty stub cycle": a device auto-creates an empty placeholder for a
@@ -343,37 +369,33 @@ export function createCapacitorAdapter(): PlatformAdapter {
           } else if (!cloudHasContent && localHasContent) {
             // Local has content, cloud is empty → push local to cloud regardless of timestamp
             try {
-              await plugin.pushPage({ id: localPage.id, json: JSON.stringify(localPage) })
+              await plugin.pushPage({ id: cloudFileId(localPage.id), json: JSON.stringify(localPage) })
               console.log('[Roma] syncPull: local has content, cloud empty — pushing real content:', localPage.id)
             } catch (e) {
               console.warn('[Roma] syncPull: push local-content-over-cloud-stub failed:', localPage.id, e)
             }
           } else if (cloudHasContent && localHasContent) {
-            // Both have content. Block sets differ → concurrent edits, merge by id so
-            // nothing is lost. Same set → fall back to last-write-wins (cheap path).
-            const cloudIds = blockIdSet(cloudPage.blocks)
-            const localIds = blockIdSet(localPage.blocks)
-            const sameSet = cloudIds.size === localIds.size && [...cloudIds].every(id => localIds.has(id))
-            if (!sameSet) {
-              const mergedPage = mergePages(cloudPage, localPage)
-              console.log('[Roma] syncPull: merging concurrent edits for', cloudPage.id, '(cloud=' + cloudIds.size, 'local=' + localIds.size, 'merged=' + mergedPage.blocks.length + ')')
+            // Both have content → ALWAYS merge by block id. Catches the silent
+            // data-loss case where both devices kept the same block IDs but
+            // edited different blocks' content. To avoid ping-pong, we skip the
+            // write to whichever side already byte-matches the merge (ignoring
+            // only page-level updatedAt, which the merge always bumps).
+            const mergedPage = mergePages(cloudPage, localPage)
+            const sameAsLocal = pagesEqualIgnoringPageTs(mergedPage, localPage)
+            const sameAsCloud = pagesEqualIgnoringPageTs(mergedPage, cloudPage)
+            if (!sameAsLocal) {
               await idbPut(PAGES_STORE, mergedPage)
               merged.push(mergedPage)
+            }
+            if (!sameAsCloud) {
               try {
-                await plugin.pushPage({ id: mergedPage.id, json: JSON.stringify(mergedPage) })
+                await plugin.pushPage({ id: cloudFileId(mergedPage.id), json: JSON.stringify(mergedPage) })
               } catch (e) {
                 console.warn('[Roma] syncPull: push merged failed:', mergedPage.id, e)
               }
-            } else if (cloudPage.updatedAt > localPage.updatedAt) {
-              await idbPut(PAGES_STORE, cloudPage)
-              merged.push(cloudPage)
-              console.log('[Roma] syncPull: cloud newer:', cloudPage.id)
-            } else if (localPage.updatedAt > cloudPage.updatedAt) {
-              try {
-                await plugin.pushPage({ id: localPage.id, json: JSON.stringify(localPage) })
-              } catch (e) {
-                console.warn('[Roma] syncPull: push local-newer failed:', localPage.id, e)
-              }
+            }
+            if (!sameAsLocal || !sameAsCloud) {
+              console.log('[Roma] syncPull: block-merged', cloudPage.id, '(writeLocal=' + !sameAsLocal, 'pushCloud=' + !sameAsCloud + ')')
             }
           }
           // else: both empty — no action needed
@@ -385,7 +407,7 @@ export function createCapacitorAdapter(): PlatformAdapter {
         for (const localPage of allLocal) {
           if (!cloudIds.has(localPage.id) && hasRealContent(localPage)) {
             try {
-              await plugin.pushPage({ id: localPage.id, json: JSON.stringify(localPage) })
+              await plugin.pushPage({ id: cloudFileId(localPage.id), json: JSON.stringify(localPage) })
               pushedCount++
             } catch (e) {
               console.warn('[Roma] syncPull: push local-only failed:', localPage.id, e)

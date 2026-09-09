@@ -17,6 +17,10 @@
   border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
   background: var(--bg-secondary);
+  /* Stays pinned at the top of the scroll region while the page scrolls (Roam-style) */
+  position: sticky;
+  top: 0;
+  z-index: 5;
 }
 
 .is-sidebar .block-breadcrumbs {
@@ -168,6 +172,25 @@
 
 .is-sidebar .zoom-hero-title {
   font-size: 18px;
+}
+
+/* Zoomed TODO block: checkbox sits inline with the protagonist title */
+.zoom-hero-title.zoom-hero-todo {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.zoom-hero-checkbox {
+  flex-shrink: 0;
+  margin-top: 6px;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  display: inline-flex;
+}
+.is-sidebar .zoom-hero-checkbox {
+  margin-top: 3px;
 }
 
 /* Scrollable area: blocks + references */

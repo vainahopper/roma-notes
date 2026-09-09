@@ -6,7 +6,7 @@ import { BlockRefAutocomplete } from './BlockRefAutocomplete'
 import { SlashMenu, type SlashCommand } from './SlashMenu'
 import { DatePickerInline } from './DatePickerInline'
 import { isEncryptedBlock, encryptBlock, encryptBlockSync, decryptBlock } from '../utils/encryption'
-import { dateToPageTitle } from '../utils/helpers'
+import { dateToPageTitle, blocksToHtmlList } from '../utils/helpers'
 import { platform } from '../platform'
 import './BlockItem.css'
 
@@ -54,6 +54,8 @@ export function BlockItem({
   const [collapsed, setCollapsed] = useState(false)
   const [showWikilink, setShowWikilink] = useState(false)
   const [wikilinkQuery, setWikilinkQuery] = useState('')
+  const [showTag, setShowTag] = useState(false)
+  const [tagQuery, setTagQuery] = useState('')
   const [showBlockRef, setShowBlockRef] = useState(false)
   const [blockRefQuery, setBlockRefQuery] = useState('')
   const [showSlash, setShowSlash] = useState(false)
@@ -83,6 +85,7 @@ export function BlockItem({
 
   const closeAllMenus = useCallback(() => {
     setShowWikilink(false)
+    setShowTag(false)
     setShowBlockRef(false)
     setShowSlash(false)
     setShowTemplate(false)
@@ -169,35 +172,51 @@ export function BlockItem({
 
     const textBefore = val.slice(0, cursor)
 
-    // [[ wikilink
+    // Exactly one menu may be open at a time. Each branch opens its own after
+    // closing the rest, so a trigger typed inside another trigger's query
+    // (e.g. "/" inside "[[…") can't leave two dropdowns stacked.
+    const openOnly = (open: (v: boolean) => void, setQuery: (q: string) => void, q: string) => {
+      closeAllMenus()
+      setQuery(q)
+      open(true)
+    }
+
+    // [[ wikilink — checked before #, so "#[[" opens the page picker and the
+    // selection lands as "#[[Page]]" with the # already in place.
     const wikilinkMatch = textBefore.match(/\[\[([^\]]*)$/)
     if (wikilinkMatch) {
-      setWikilinkQuery(wikilinkMatch[1])
-      setShowWikilink(true); setShowBlockRef(false); setShowSlash(false)
+      openOnly(setShowWikilink, setWikilinkQuery, wikilinkMatch[1])
       return
     }
 
     // (( block ref
     const blockRefMatch = textBefore.match(/\(\(([^)]*)$/)
     if (blockRefMatch) {
-      setBlockRefQuery(blockRefMatch[1])
-      setShowBlockRef(true); setShowWikilink(false); setShowSlash(false)
+      openOnly(setShowBlockRef, setBlockRefQuery, blockRefMatch[1])
+      return
+    }
+
+    // # tag — same page picker as [[, inserted as a tag (Roam behaviour).
+    // The query is limited to the characters a bare #tag can hold (see the
+    // tag regex in BlockContent.tsx); multi-word titles are reached by typing
+    // one word and picking the match, which expands to #[[Multi Word]].
+    const tagMatch = textBefore.match(/(?:^|\s)#([A-Za-z0-9_À-ÿ-]*)$/)
+    if (tagMatch) {
+      openOnly(setShowTag, setTagQuery, tagMatch[1])
       return
     }
 
     // / slash menu
     const slashMatch = textBefore.match(/(?:^|\s)\/([^/\s\n]*)$/)
     if (slashMatch) {
-      setSlashQuery(slashMatch[1])
-      setShowSlash(true); setShowWikilink(false); setShowBlockRef(false); setShowTemplate(false)
+      openOnly(setShowSlash, setSlashQuery, slashMatch[1])
       return
     }
 
     // ;; template trigger
     const templateMatch = textBefore.match(/;;(.*)$/)
     if (templateMatch) {
-      setTemplateQuery(templateMatch[1].trim())
-      setShowTemplate(true); setShowWikilink(false); setShowBlockRef(false); setShowSlash(false)
+      openOnly(setShowTemplate, setTemplateQuery, templateMatch[1].trim())
       return
     }
 
@@ -247,6 +266,8 @@ export function BlockItem({
       } else {
         e.clipboardData.setData('text/plain', `- ${content}`)
       }
+      // Rich-text targets (Notes/Word/email/Slack) get real nested bullets
+      e.clipboardData.setData('text/html', blocksToHtmlList([{ ...block, content }]))
     } else {
       // Partial selection: copy just the selected text without a bullet prefix
       // (the user is copying a fragment, not a whole block)
@@ -254,7 +275,7 @@ export function BlockItem({
   }, [block, content])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    const anyMenuOpen = showWikilink || showBlockRef || showSlash || showTemplate
+    const anyMenuOpen = showWikilink || showTag || showBlockRef || showSlash || showTemplate
     if (anyMenuOpen && ['ArrowUp', 'ArrowDown', 'Enter', 'Tab'].includes(e.key)) { e.preventDefault(); return }
     if (anyMenuOpen && e.key === 'Escape') { e.preventDefault(); closeAllMenus(); return }
 
@@ -304,7 +325,12 @@ export function BlockItem({
     }
 
     // ── Bracket / paren wrapping and auto-close ──
-    if ((e.key === '[' || e.key === '(') && ta) {
+    // iOS soft keyboards don't honor keydown preventDefault for character keys:
+    // the char is inserted natively *in addition to* our manual setContent, so a
+    // single "(" becomes "((" and wrongly triggers the block-ref search. Skip the
+    // keydown manipulation on mobile — the "((" / "[[" menus still open via the
+    // change handler (which reads the real textarea value) when actually typed.
+    if (!platform.isCapacitor() && (e.key === '[' || e.key === '(') && ta) {
       const selStart = ta.selectionStart
       const selEnd = ta.selectionEnd
       const val = ta.value
@@ -346,18 +372,70 @@ export function BlockItem({
         return
       }
 
-      // ── No selection: auto-close on second bracket ──
+      // ── No selection: second bracket inside an auto-closed pair ──
+      // Roam-style: a single `[`/`(` was auto-closed to `[|]`/`(|)`, so the
+      // matching close already sits right after the cursor. Typing the second
+      // bracket upgrades the pair to `[[|]]` / `((|))` and opens the menu.
+      // If the previous bracket is a stray literal from earlier text (no
+      // matching close after the cursor), treat the new one as a plain char.
       if (selEnd === selStart && before.endsWith(e.key)) {
-        e.preventDefault()
         const after = val.slice(selStart)
-        const newVal = before + (isSquare ? '[]]' : '())') + after
+        const alreadyClosed = after.startsWith(singleClose)
+        if (alreadyClosed) {
+          e.preventDefault()
+          const insert = isSquare ? '[]' : '()'
+          const newVal = before + insert + after
+          const newCursor = selStart + 1
+          setContent(newVal); onChange(block.id, newVal)
+          setTimeout(() => {
+            ta.setSelectionRange(newCursor, newCursor)
+            if (isSquare) { setWikilinkQuery(''); setShowWikilink(true) }
+            else { setBlockRefQuery(''); setShowBlockRef(true) }
+          }, 0)
+          return
+        }
+        // Stray bracket before cursor — insert a single literal bracket, no menu.
+        e.preventDefault()
+        const newVal = before + e.key + after
         const newCursor = selStart + 1
         setContent(newVal); onChange(block.id, newVal)
-        setTimeout(() => {
-          ta.setSelectionRange(newCursor, newCursor)
-          if (isSquare) { setWikilinkQuery(''); setShowWikilink(true) }
-          else { setBlockRefQuery(''); setShowBlockRef(true) }
-        }, 0)
+        setTimeout(() => ta.setSelectionRange(newCursor, newCursor), 0)
+        return
+      }
+
+      // ── No selection, single `[` or `(`: auto-close with cursor between ──
+      // (Roam-style — `[` → `[|]`, `(` → `(|)`. Typing the second bracket then
+      // upgrades to `[[|]]` / `((|))` via the block above and opens the menu.
+      // A single bracket opens no menu — only the doubled form does.)
+      if (selEnd === selStart && !before.endsWith(e.key)) {
+        const after = val.slice(selStart)
+        // Only auto-close when the cursor is at end-of-text or the next char is
+        // whitespace or a closing bracket — otherwise the close would land
+        // mid-word.
+        const next = after.charAt(0)
+        const shouldAutoClose = next === '' || /[\s\)\]\}>,.;:!?]/.test(next)
+        if (shouldAutoClose) {
+          e.preventDefault()
+          const newVal = before + e.key + singleClose + after
+          const newCursor = selStart + 1
+          setContent(newVal); onChange(block.id, newVal)
+          setTimeout(() => ta.setSelectionRange(newCursor, newCursor), 0)
+          return
+        }
+      }
+    }
+
+    // ── Overtype `]`/`)` when the next char is already the same close ──
+    // (Roam-style — typing the closing bracket of an auto-closed pair skips
+    // past it instead of inserting a duplicate.) Skip on mobile for the same
+    // iOS preventDefault reason as the auto-close block above.
+    if (!platform.isCapacitor() && (e.key === ']' || e.key === ')') && ta) {
+      const selStart = ta.selectionStart
+      const selEnd = ta.selectionEnd
+      if (selStart === selEnd && ta.value.charAt(selStart) === e.key) {
+        e.preventDefault()
+        const newCursor = selStart + 1
+        setTimeout(() => ta.setSelectionRange(newCursor, newCursor), 0)
         return
       }
     }
@@ -427,6 +505,17 @@ export function BlockItem({
             }
           }
 
+          // After single "[" → delete the auto-paired "]" right after the cursor
+          if (beforeCur.endsWith('[') && !beforeCur.endsWith('[[') &&
+              afterCur.startsWith(']') && !afterCur.startsWith(']]')) {
+            e.preventDefault()
+            const newVal = beforeCur.slice(0, -1) + afterCur.slice(1)
+            const nc = cursor - 1
+            setContent(newVal); onChange(block.id, newVal); setShowWikilink(false)
+            setTimeout(() => ta.setSelectionRange(nc, nc), 0)
+            break
+          }
+
           // After single "[" → clean up orphan "]]"
           if (beforeCur.endsWith('[') && !beforeCur.endsWith('[[')) {
             const closingIdx = afterCur.indexOf(']]')
@@ -454,6 +543,17 @@ export function BlockItem({
             }
           }
 
+          // After single "(" → delete the auto-paired ")" right after the cursor
+          if (beforeCur.endsWith('(') && !beforeCur.endsWith('((') &&
+              afterCur.startsWith(')') && !afterCur.startsWith('))')) {
+            e.preventDefault()
+            const newVal = beforeCur.slice(0, -1) + afterCur.slice(1)
+            const nc = cursor - 1
+            setContent(newVal); onChange(block.id, newVal); setShowBlockRef(false)
+            setTimeout(() => ta.setSelectionRange(nc, nc), 0)
+            break
+          }
+
           // After single "(" → clean up orphan "))"
           if (beforeCur.endsWith('(') && !beforeCur.endsWith('((')) {
             const closingIdx = afterCur.indexOf('))')
@@ -467,9 +567,12 @@ export function BlockItem({
             }
           }
 
-          // Close menus if brackets are gone
+          // Close menus if their trigger is gone
           if (showWikilink && !beforeCur.includes('[[')) setShowWikilink(false)
           if (showBlockRef && !beforeCur.includes('((')) setShowBlockRef(false)
+          // beforeCur still holds the pre-Backspace text, so check the string
+          // that will remain after this keypress deletes one character.
+          if (showTag && !/(?:^|\s)#[A-Za-z0-9_À-ÿ-]*$/.test(beforeCur.slice(0, -1))) setShowTag(false)
         }
         // Delete empty block (including todos); pass collapsed so parent can remove subtree
         if (!content) { e.preventDefault(); onBackspace(block.id, true, collapsed) }
@@ -505,7 +608,7 @@ export function BlockItem({
         if (e.ctrlKey || e.metaKey) { e.preventDefault(); setEncryptModal(true) }
         break
     }
-  }, [block.id, content, collapsed, showWikilink, showBlockRef, showSlash, closeAllMenus, setEncryptModal, onEnter, onBackspace, onTab, onArrowUp, onArrowDown, onToggleCheck, onToggleTodo, onChange])
+  }, [block.id, content, collapsed, showWikilink, showTag, showBlockRef, showSlash, showTemplate, closeAllMenus, setEncryptModal, onEnter, onBackspace, onTab, onArrowUp, onArrowDown, onToggleCheck, onToggleTodo, onChange])
 
   const handleSelectPage = useCallback((page: Page) => {
     const ta = textareaRef.current
@@ -528,6 +631,22 @@ export function BlockItem({
     setContent(newContent); onChange(block.id, newContent); setShowWikilink(false)
     setTimeout(() => ta?.focus(), 0)
   }, [block.id, content, onChange])
+
+  // Insert a picked page as a tag. A title made only of bare-tag characters
+  // becomes "#title"; anything else (spaces, punctuation) needs the bracketed
+  // "#[[title]]" form, which is what BlockContent's tag parser accepts.
+  const insertTag = useCallback((title: string) => {
+    const ta = textareaRef.current
+    const cursor = ta?.selectionStart ?? content.length
+    const tag = /^[A-Za-z0-9_À-ÿ-]+$/.test(title) ? `#${title}` : `#[[${title}]]`
+    const newBefore = content.slice(0, cursor).replace(/#[A-Za-z0-9_À-ÿ-]*$/, tag)
+    const newContent = newBefore + content.slice(cursor)
+    setContent(newContent); onChange(block.id, newContent); setShowTag(false)
+    setTimeout(() => { ta?.focus(); ta?.setSelectionRange(newBefore.length, newBefore.length) }, 0)
+  }, [block.id, content, onChange])
+
+  const handleSelectTag = useCallback((page: Page) => insertTag(page.title), [insertTag])
+  const handleCreateTag = useCallback((title: string) => insertTag(title), [insertTag])
 
   const handleSelectBlockRef = useCallback((blockId: string) => {
     const ta = textareaRef.current
@@ -900,6 +1019,11 @@ export function BlockItem({
       {showWikilink && editing && (
         <WikilinkAutocomplete query={wikilinkQuery} allPages={allPages} anchorRef={textareaRef}
           onSelect={handleSelectPage} onCreate={handleCreatePage} onClose={() => setShowWikilink(false)} />
+      )}
+
+      {showTag && editing && (
+        <WikilinkAutocomplete query={tagQuery} allPages={allPages} anchorRef={textareaRef}
+          onSelect={handleSelectTag} onCreate={handleCreateTag} onClose={() => setShowTag(false)} />
       )}
 
       {showBlockRef && editing && (

@@ -52,6 +52,23 @@ function mergePages(cloudPage, localPage) {
   }
 }
 
+function pagesEqualIgnoringPageTs(a, b) {
+  const stripA = { ...a }; delete stripA.updatedAt
+  const stripB = { ...b }; delete stripB.updatedAt
+  return JSON.stringify(stripA) === JSON.stringify(stripB)
+}
+
+// Simulates one pull iteration for the "both have content" branch:
+// returns { writeLocal, pushCloud, merged } so we can assert the new behavior.
+function pullStep(cloudPage, localPage) {
+  const merged = mergePages(cloudPage, localPage)
+  return {
+    merged,
+    writeLocal: !pagesEqualIgnoringPageTs(merged, localPage),
+    pushCloud: !pagesEqualIgnoringPageTs(merged, cloudPage),
+  }
+}
+
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 let passed = 0, failed = 0
@@ -124,6 +141,108 @@ test('missing updatedAt fields: still merges without crashing', () => {
   const newer = [{ id: 'A', content: 'a', children: [] }]
   const older = [{ id: 'B', content: 'b', children: [] }]
   eq(mergeBlockLists(newer, older).map(b => b.id), ['A', 'B'])
+})
+
+console.log('\npullStep (concurrent-edit data-loss prevention):')
+
+test('sameSet, different per-block edits: BOTH preserved (no whole-page overwrite)', () => {
+  // The hole the user worried about: Mac edits A, iPhone edits B, same ID set {A,B,C}.
+  // Old code: sameSet → last-write-wins → one side lost. New code: per-block merge.
+  const cloud = {
+    id: '2026-05-07', title: '', isDaily: true,
+    blocks: [
+      blk('A', 'mac-edit-A', '2026-05-07T10:05:00Z'),
+      blk('B', 'orig-B',     '2026-05-07T09:00:00Z'),
+      blk('C', 'orig-C',     '2026-05-07T09:00:00Z'),
+    ],
+    updatedAt: '2026-05-07T10:05:00Z',
+  }
+  const local = {
+    id: '2026-05-07', title: '', isDaily: true,
+    blocks: [
+      blk('A', 'orig-A',         '2026-05-07T09:00:00Z'),
+      blk('B', 'iphone-edit-B',  '2026-05-07T10:06:00Z'),
+      blk('C', 'orig-C',         '2026-05-07T09:00:00Z'),
+    ],
+    updatedAt: '2026-05-07T10:06:00Z',
+  }
+  const { merged, writeLocal, pushCloud } = pullStep(cloud, local)
+  eq(merged.blocks.find(b => b.id === 'A').content, 'mac-edit-A')    // Mac's edit kept
+  eq(merged.blocks.find(b => b.id === 'B').content, 'iphone-edit-B') // iPhone's edit kept
+  eq(merged.blocks.find(b => b.id === 'C').content, 'orig-C')
+  if (!writeLocal) throw new Error('expected local write (A was stale on local)')
+  if (!pushCloud) throw new Error('expected cloud push (B was stale on cloud)')
+})
+
+test('sameSet, identical content: no I/O (convergence, no ping-pong)', () => {
+  const blocks = [blk('A', 'a', '2026-05-07T10:00:00Z'), blk('B', 'b', '2026-05-07T11:00:00Z')]
+  const cloud = { id: 'p', title: '', blocks, updatedAt: '2026-05-07T11:00:00Z' }
+  const local = { id: 'p', title: '', blocks, updatedAt: '2026-05-07T11:30:00Z' } // diff page ts only
+  const { writeLocal, pushCloud } = pullStep(cloud, local)
+  if (writeLocal) throw new Error('expected no local write — blocks identical')
+  if (pushCloud)  throw new Error('expected no cloud push — blocks identical')
+})
+
+test('cloud-only edit (local untouched): writes local, no cloud push', () => {
+  const cloud = { id: 'p', title: '', blocks: [blk('A', 'updated', '2026-05-07T11:00:00Z')], updatedAt: '2026-05-07T11:00:00Z' }
+  const local = { id: 'p', title: '', blocks: [blk('A', 'stale',   '2026-05-07T09:00:00Z')], updatedAt: '2026-05-07T09:00:00Z' }
+  const { merged, writeLocal, pushCloud } = pullStep(cloud, local)
+  eq(merged.blocks[0].content, 'updated')
+  if (!writeLocal) throw new Error('expected local write')
+  if (pushCloud) throw new Error('expected NO cloud push — cloud already has merged content')
+})
+
+test('local-only edit (cloud stale): pushes cloud, no local write', () => {
+  const cloud = { id: 'p', title: '', blocks: [blk('A', 'stale',   '2026-05-07T09:00:00Z')], updatedAt: '2026-05-07T09:00:00Z' }
+  const local = { id: 'p', title: '', blocks: [blk('A', 'updated', '2026-05-07T11:00:00Z')], updatedAt: '2026-05-07T11:00:00Z' }
+  const { merged, writeLocal, pushCloud } = pullStep(cloud, local)
+  eq(merged.blocks[0].content, 'updated')
+  if (writeLocal) throw new Error('expected NO local write — local already has merged content')
+  if (!pushCloud) throw new Error('expected cloud push')
+})
+
+test('reorder on one side + content edit on the other: both preserved', () => {
+  // Mac reorders [A,B,C] → [B,A,C]. iPhone edits A's content in original order.
+  // Same ID set. New per-block merge keeps Mac's order (newer page ts) AND
+  // iPhone's A content (newer block ts).
+  const cloud = {
+    id: 'p', title: '',
+    blocks: [
+      blk('B', 'b', '2026-05-07T09:00:00Z'),
+      blk('A', 'orig-A', '2026-05-07T09:00:00Z'),
+      blk('C', 'c', '2026-05-07T09:00:00Z'),
+    ],
+    updatedAt: '2026-05-07T10:05:00Z', // Mac saved most recently (reorder)
+  }
+  const local = {
+    id: 'p', title: '',
+    blocks: [
+      blk('A', 'iphone-A', '2026-05-07T10:00:00Z'),
+      blk('B', 'b', '2026-05-07T09:00:00Z'),
+      blk('C', 'c', '2026-05-07T09:00:00Z'),
+    ],
+    updatedAt: '2026-05-07T10:00:00Z',
+  }
+  const { merged } = pullStep(cloud, local)
+  eq(merged.blocks.map(b => b.id), ['B', 'A', 'C']) // Mac's order (newer page ts)
+  eq(merged.blocks.find(b => b.id === 'A').content, 'iphone-A') // iPhone's content (newer block ts)
+})
+
+test('convergence: after first merge, second pull is a no-op on both sides', () => {
+  // Simulates: iPhone pulls and merges → pushes to cloud. Mac later pulls.
+  // The Mac side now sees cloud == merged. Re-merging should be no-op.
+  const cloud = { id: 'p', title: '', blocks: [blk('A', 'mac', '2026-05-07T10:00:00Z'), blk('B', 'orig', '2026-05-07T09:00:00Z')], updatedAt: '2026-05-07T10:00:00Z' }
+  const local = { id: 'p', title: '', blocks: [blk('A', 'orig', '2026-05-07T09:00:00Z'), blk('B', 'iphone', '2026-05-07T10:01:00Z')], updatedAt: '2026-05-07T10:01:00Z' }
+  // iPhone pulls + merges + pushes:
+  const round1 = pullStep(cloud, local)
+  // Cloud now has merged. Mac local is still its old cloud. Mac pulls:
+  const round2 = pullStep(round1.merged, cloud)
+  if (round2.pushCloud) throw new Error('round 2 should not push — cloud already has merged')
+  // Mac will write merged locally (round2.writeLocal=true) → that's fine and expected.
+  // Now both devices have merged. A third pull on either side:
+  const round3 = pullStep(round1.merged, round1.merged)
+  if (round3.writeLocal) throw new Error('round 3 should not write local — already merged')
+  if (round3.pushCloud)  throw new Error('round 3 should not push cloud — already merged')
 })
 
 console.log(`\n${passed} passed, ${failed} failed`)

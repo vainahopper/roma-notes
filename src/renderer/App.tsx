@@ -42,6 +42,7 @@ export default function App() {
   const [mainView, setMainView] = useState<MainView>('daily')
   const [scrollToDate, setScrollToDate] = useState<string | null>(null)
   const [sidebarPageId, setSidebarPageId] = useState<string | null>(null)
+  const [sidebarBlockZoom, setSidebarBlockZoom] = useState<ZoomFrame[] | null>(null)
   const [showSearch, setShowSearch] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [showCalendar, setShowCalendar] = useState(false)
@@ -461,7 +462,21 @@ export default function App() {
   // Open in right sidebar (Shift+click)
   const handleOpenSidebar = useCallback((pageId: string) => {
     setSidebarPageId(pageId)
+    setSidebarBlockZoom(null)
   }, [])
+
+  // Navigation INSIDE the right sidebar — clicks stay in the sidebar (Roam-style).
+  const handleSidebarInternalNavigate = useCallback((pageId: string, _pageTitle?: string) => {
+    setSidebarPageId(pageId)
+    setSidebarBlockZoom(null)
+  }, [])
+
+  const handleSidebarInternalNavigateToBlock = useCallback((pageId: string, _pageTitle: string, blockId: string) => {
+    const page = store.pages.get(pageId)
+    const path = page ? findBlockPath(blockId, page.blocks) : null
+    setSidebarBlockZoom(path ?? [{ blockId, blockContent: '' }])
+    setSidebarPageId(pageId)
+  }, [store.pages])
 
   const handlePageDeleted = useCallback((pageId: string) => {
     if (mainView === pageId) {
@@ -650,12 +665,13 @@ export default function App() {
               <button className="close-btn" onClick={() => setSidebarPageId(null)} title="Close">×</button>
             </div>
             <PageView
-              key={`sidebar-${sidebarPage.id}`}
+              key={`sidebar-${sidebarPage.id}-${sidebarBlockZoom?.map(f => f.blockId).join('>') ?? ''}`}
               page={sidebarPage}
               allPages={store.pages}
-              onNavigate={handleNavigateToContent}
+              onNavigate={handleSidebarInternalNavigate}
               onOpenSidebar={handleOpenSidebar}
-              onNavigateToBlock={handleNavigateToBlock}
+              onNavigateToBlock={handleSidebarInternalNavigateToBlock}
+              initialZoom={sidebarBlockZoom}
               isSidebar
             />
           </div>

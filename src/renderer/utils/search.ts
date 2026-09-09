@@ -79,19 +79,17 @@ function addBlocksToIndex(pageId: string, pageTitle: string, pageUpdatedAt: stri
   }
 }
 
-export function search(query: string, limit = 30): SearchResult[] {
-  if (!fuseIndex || !query.trim()) return []
+type ScoredItem = { item: SearchIndex; score: number | undefined }
 
-  const results = fuseIndex.search(normalizeAccents(query), { limit: limit * 5 })
-
-  // Pages always rank above blocks (each group sorted by Fuse score)
+function rankAndDedup(results: ScoredItem[], limit: number): SearchResult[] {
+  // Pages always rank above blocks (each group sorted by score)
   const pages = results.filter(r => r.item.type === 'page')
   const blocks = results.filter(r => r.item.type === 'block')
 
   // Deduplicate blocks: one result per page.
-  // Prefer blocks with real content over wikilink-only; among equals use Fuse score.
+  // Prefer blocks with real content over wikilink-only; among equals use score.
   const seenPageIds = new Set(pages.map(r => r.item.pageId))
-  const bestBlockPerPage = new Map<string, typeof blocks[number]>()
+  const bestBlockPerPage = new Map<string, ScoredItem>()
   for (const r of blocks) {
     const pageId = r.item.pageId
     if (seenPageIds.has(pageId)) continue // page title already in results
@@ -112,7 +110,7 @@ export function search(query: string, limit = 30): SearchResult[] {
     }
   }
 
-  // Pages: sorted by Fuse score (match quality)
+  // Pages: sorted by score (match quality)
   const sortedPages = pages.sort((a, b) => (a.score ?? 1) - (b.score ?? 1))
 
   // Blocks: sorted by recency (most recently updated page first).
@@ -124,9 +122,7 @@ export function search(query: string, limit = 30): SearchResult[] {
     return new Date(b.item.pageUpdatedAt).getTime() - new Date(a.item.pageUpdatedAt).getTime()
   })
 
-  const deduped = [...sortedPages, ...sortedBlocks].slice(0, limit)
-
-  return deduped.map(r => ({
+  return [...sortedPages, ...sortedBlocks].slice(0, limit).map(r => ({
     type: r.item.type,
     pageId: r.item.pageId,
     pageTitle: r.item.pageTitle,
@@ -134,6 +130,33 @@ export function search(query: string, limit = 30): SearchResult[] {
     content: truncate(r.item.text, 120),
     score: r.score ?? 1,
   }))
+}
+
+export function search(query: string, limit = 30): SearchResult[] {
+  if (!fuseIndex || !query.trim()) return []
+
+  const normalizedQuery = normalizeAccents(query)
+  const words = normalizedQuery.toLowerCase().split(/\s+/).filter(Boolean)
+
+  // Always run Fuse search (handles single words + fuzzy phrases)
+  const fuseResults: ScoredItem[] = fuseIndex.search(normalizedQuery, { limit: limit * 5 })
+
+  // For multi-word queries, also find items where ALL words appear anywhere (non-consecutive)
+  if (words.length > 1) {
+    const fuseKeys = new Set(fuseResults.map(r => r.item.pageId + '|' + (r.item.blockId ?? '')))
+    for (const item of indexedItems) {
+      const normalized = item.normalized.toLowerCase()
+      if (words.every(w => normalized.includes(w))) {
+        const key = item.pageId + '|' + (item.blockId ?? '')
+        if (!fuseKeys.has(key)) {
+          fuseResults.push({ item, score: 0.3 })
+          fuseKeys.add(key)
+        }
+      }
+    }
+  }
+
+  return rankAndDedup(fuseResults, limit)
 }
 
 // Quick page-only search (for [[ autocomplete)

@@ -2,9 +2,10 @@
   width: var(--sidebar-width);
   min-width: var(--sidebar-min);
   max-width: var(--sidebar-max);
+  /* --bg-glass is 85–92% opaque and native macOS vibrancy already sits under the
+     window, so a CSS backdrop-filter here added continuous GPU compositing for a
+     blur that's barely visible. Dropped it to cut idle energy use. */
   background: var(--bg-glass);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
   border-right: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;

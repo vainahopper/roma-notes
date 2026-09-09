@@ -1,11 +1,12 @@
 import React, { useState, useRef, useCallback } from 'react'
 import type { Page, Block } from '../../shared/types'
 import { BlockContent } from './BlockContent'
+import type { BlockMatch } from '../utils/helpers'
 import './LinkedReferences.css'
 
 interface Backlink {
   page: Page
-  blocks: Block[]
+  matches: BlockMatch[]
 }
 
 interface Props {
@@ -18,9 +19,11 @@ interface Props {
   onEditBlock?: (pageId: string, blockId: string, content: string) => void
   title?: string
   onLinkAll?: () => void
+  /** When true, render each source page/day as a large prominent header (TODO page) */
+  prominentPageTitle?: boolean
 }
 
-export function LinkedReferences({ backlinks, allPages, onNavigate, onNavigateToBlock, onToggleBlock, onToggleTodoMarker, onEditBlock, title = 'Linked References', onLinkAll }: Props) {
+export function LinkedReferences({ backlinks, allPages, onNavigate, onNavigateToBlock, onToggleBlock, onToggleTodoMarker, onEditBlock, title = 'Linked References', onLinkAll, prominentPageTitle = false }: Props) {
   const [open, setOpen] = useState(true)
 
   return (
@@ -45,17 +48,18 @@ export function LinkedReferences({ backlinks, allPages, onNavigate, onNavigateTo
 
       {open && (
         <div className="linked-refs-list">
-          {backlinks.map(({ page, blocks }) => (
+          {backlinks.map(({ page, matches }) => (
             <BacklinkItem
               key={page.id}
               page={page}
-              blocks={blocks}
+              matches={matches}
               allPages={allPages}
               onNavigate={onNavigate}
               onNavigateToBlock={onNavigateToBlock}
               onToggleBlock={onToggleBlock}
               onToggleTodoMarker={onToggleTodoMarker}
               onEditBlock={onEditBlock}
+              prominentPageTitle={prominentPageTitle}
             />
           ))}
         </div>
@@ -65,29 +69,35 @@ export function LinkedReferences({ backlinks, allPages, onNavigate, onNavigateTo
 }
 
 function BacklinkItem({
-  page, blocks, allPages, onNavigate, onNavigateToBlock, onToggleBlock, onToggleTodoMarker, onEditBlock,
+  page, matches, allPages, onNavigate, onNavigateToBlock, onToggleBlock, onToggleTodoMarker, onEditBlock, prominentPageTitle,
 }: {
   page: Page
-  blocks: Block[]
+  matches: BlockMatch[]
   allPages: Map<string, Page>
   onNavigate: (id: string, title?: string) => void
   onNavigateToBlock?: (pageId: string, pageTitle: string, blockId: string) => void
   onToggleBlock?: (pageId: string, blockId: string) => void
   onToggleTodoMarker?: (pageId: string, blockId: string) => void
   onEditBlock?: (pageId: string, blockId: string, content: string) => void
+  prominentPageTitle?: boolean
 }) {
   const [open, setOpen] = useState(true)
 
   return (
     <div className="backlink-item">
-      {/* Page title row */}
-      <button className="backlink-page-title" onClick={() => onNavigate(page.id, page.title)}>
+      {/* Page title row — the day is the primary navigation target (Roam-style) */}
+      <button
+        className={`backlink-page-title${prominentPageTitle ? ' prominent' : ''}`}
+        onClick={() => onNavigate(page.id, page.title)}
+        title="Open this day"
+      >
         <span className="backlink-page-bullet">○</span>
-        {page.title}
+        <span className="backlink-page-name">{page.title}</span>
+        {prominentPageTitle && <span className="backlink-page-open-hint">↗</span>}
       </button>
 
       {/* Toggle button for blocks */}
-      {blocks.length > 0 && (
+      {matches.length > 0 && (
         <button className="backlink-toggle" onClick={() => setOpen(o => !o)} title={open ? 'Collapse' : 'Expand'}>
           <svg
             width="9" height="9" viewBox="0 0 10 10" fill="none"
@@ -101,10 +111,10 @@ function BacklinkItem({
       {/* Block previews with full rendering */}
       {open && (
         <div className="backlink-blocks">
-          {blocks.map(block => (
-            <BacklinkBlock
-              key={block.id}
-              block={block}
+          {matches.map(match => (
+            <BacklinkMatch
+              key={match.block.id}
+              match={match}
               page={page}
               allPages={allPages}
               onNavigate={onNavigate}
@@ -120,11 +130,69 @@ function BacklinkItem({
   )
 }
 
+function BacklinkMatch({
+  match, page, allPages, onNavigate, onNavigateToBlock, onToggleBlock, onToggleTodoMarker, onEditBlock,
+}: {
+  match: BlockMatch
+  page: Page
+  allPages: Map<string, Page>
+  onNavigate: (id: string, title?: string) => void
+  onNavigateToBlock?: (pageId: string, pageTitle: string, blockId: string) => void
+  onToggleBlock?: (pageId: string, blockId: string) => void
+  onToggleTodoMarker?: (pageId: string, blockId: string) => void
+  onEditBlock?: (pageId: string, blockId: string, content: string) => void
+}) {
+  const { block, parents } = match
+  const handleParentClick = (parent: Block) => {
+    if (onNavigateToBlock) onNavigateToBlock(page.id, page.title, parent.id)
+    else onNavigate(page.id, page.title)
+  }
+
+  return (
+    <div className="backlink-match">
+      {parents.length > 0 && (
+        <div className="backlink-parent-breadcrumb">
+          {parents.map((parent, idx) => (
+            <React.Fragment key={parent.id}>
+              <span
+                className="backlink-parent-crumb"
+                onClick={() => handleParentClick(parent)}
+                title="Go to parent block"
+              >
+                <BlockContent
+                  content={parent.content}
+                  allPages={allPages}
+                  onNavigate={onNavigate}
+                  onOpenSidebar={() => {}}
+                />
+              </span>
+              <span className="backlink-parent-sep">›</span>
+            </React.Fragment>
+          ))}
+        </div>
+      )}
+      <div>
+        <BacklinkBlock
+          block={block}
+          page={page}
+          allPages={allPages}
+          onNavigate={onNavigate}
+          onNavigateToBlock={onNavigateToBlock}
+          onToggleBlock={onToggleBlock}
+          onToggleTodoMarker={onToggleTodoMarker}
+          onEditBlock={onEditBlock}
+          initiallyExpanded
+        />
+      </div>
+    </div>
+  )
+}
+
 const TODO_RE = /\{\{\[\[TODO\]\]\}\}/i
 const DONE_RE = /\{\{\[\[DONE\]\]\}\}/i
 
 function BacklinkBlock({
-  block, page, allPages, onNavigate, onNavigateToBlock, onToggleBlock, onToggleTodoMarker, onEditBlock,
+  block, page, allPages, onNavigate, onNavigateToBlock, onToggleBlock, onToggleTodoMarker, onEditBlock, initiallyExpanded,
 }: {
   block: Block
   page: Page
@@ -134,19 +202,18 @@ function BacklinkBlock({
   onToggleBlock?: (pageId: string, blockId: string) => void
   onToggleTodoMarker?: (pageId: string, blockId: string) => void
   onEditBlock?: (pageId: string, blockId: string, content: string) => void
+  initiallyExpanded?: boolean
 }) {
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(initiallyExpanded ?? false)
   const [editing, setEditing] = useState(false)
   const [editValue, setEditValue] = useState(block.content)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const hasChildren = block.children.length > 0
 
-  // Sync editValue when block.content changes externally
   React.useEffect(() => {
     if (!editing) setEditValue(block.content)
   }, [block.content, editing])
 
-  // Auto-resize textarea
   const autoResize = useCallback(() => {
     const ta = textareaRef.current
     if (!ta) return
@@ -158,13 +225,11 @@ function BacklinkBlock({
     if (editing) {
       autoResize()
       textareaRef.current?.focus()
-      // Place cursor at end
       const len = editValue.length
       textareaRef.current?.setSelectionRange(len, len)
     }
   }, [editing]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Determine todo state — support both checked prop (app) and content syntax (Roam)
   let effectiveChecked = block.checked
   if (effectiveChecked === null || effectiveChecked === undefined) {
     if (DONE_RE.test(block.content)) effectiveChecked = true
@@ -172,7 +237,6 @@ function BacklinkBlock({
   }
   const isTodo = effectiveChecked !== null && effectiveChecked !== undefined
 
-  // Strip inline {{[[TODO]]}} / {{[[DONE]]}} tokens when we're showing a checkbox
   const displayContent = isTodo
     ? block.content.replace(/\{\{\[\[TODO\]\]\}\}|\{\{\[\[DONE\]\]\}\}/gi, '').trim()
     : block.content
@@ -211,15 +275,18 @@ function BacklinkBlock({
       textareaRef.current?.blur()
     }
     if (e.key === 'Escape') {
-      setEditValue(block.content) // revert
+      setEditValue(block.content)
       setEditing(false)
     }
   }
 
+  const handleSliderChange = useCallback((newContent: string) => {
+    onEditBlock?.(page.id, block.id, newContent)
+  }, [onEditBlock, page.id, block.id])
+
   return (
     <div className="backlink-block-row">
       <div className="backlink-block-preview">
-        {/* Toggle collapse for children */}
         <div className="backlink-toggle-area">
           {hasChildren && (
             <button
@@ -237,7 +304,6 @@ function BacklinkBlock({
           )}
         </div>
 
-        {/* Bullet dot — clicking navigates to block */}
         <div className={`backlink-bullet-area${isTodo ? ' todo-bullet-area' : ''}`}>
           {isTodo ? (
             <>
@@ -272,7 +338,6 @@ function BacklinkBlock({
           )}
         </div>
 
-        {/* Content: editable textarea when editing, rendered content otherwise */}
         {editing ? (
           <textarea
             ref={textareaRef}
@@ -294,12 +359,12 @@ function BacklinkBlock({
               allPages={allPages}
               onNavigate={onNavigate}
               onOpenSidebar={() => {}}
+              onSliderChange={onEditBlock ? handleSliderChange : undefined}
             />
           </div>
         )}
       </div>
 
-      {/* Children blocks (indented) */}
       {expanded && hasChildren && (
         <div className="backlink-children">
           {block.children.map(child => (

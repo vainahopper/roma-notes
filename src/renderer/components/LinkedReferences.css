@@ -4,6 +4,41 @@
   padding: 20px 60px 40px;
 }
 
+.backlink-match {
+  margin-bottom: 2px;
+}
+
+.backlink-parent-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  padding: 2px 4px 4px;
+}
+.backlink-parent-crumb {
+  cursor: pointer;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 3px;
+  padding: 0 3px;
+  transition: background var(--transition), color var(--transition);
+}
+.backlink-parent-crumb:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.backlink-parent-sep {
+  color: var(--text-muted);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.backlink-parent-sep + .backlink-parent-sep { display: none; }
+
 .linked-refs-header-row {
   display: flex;
   align-items: center;
@@ -90,6 +125,31 @@
   font-size: 12px;
   color: var(--link);
   flex-shrink: 0;
+}
+
+/* Prominent day header (TODO page) — the day is the most clickable element, Roam-style */
+.backlink-page-title.prominent {
+  font-size: 16px;
+  font-weight: 700;
+  padding: 13px 14px;
+  letter-spacing: -0.01em;
+}
+.backlink-page-title.prominent .backlink-page-bullet {
+  font-size: 15px;
+}
+.backlink-page-name {
+  flex: 1;
+  min-width: 0;
+}
+.backlink-page-open-hint {
+  font-size: 13px;
+  color: var(--text-muted);
+  opacity: 0;
+  flex-shrink: 0;
+  transition: opacity var(--transition);
+}
+.backlink-page-title.prominent:hover .backlink-page-open-hint {
+  opacity: 1;
 }
 
 /* Expand/collapse toggle for the whole block list */

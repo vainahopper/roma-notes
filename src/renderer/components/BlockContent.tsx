@@ -11,10 +11,23 @@ interface Props {
   onNavigate: (id: string, title?: string) => void
   onOpenSidebar: (id: string) => void
   onNavigateToBlock?: (pageId: string, pageTitle: string, blockId: string) => void
+  onSliderChange?: (newContent: string) => void
 }
 
-export function BlockContent({ content, checked, allPages, onNavigate, onOpenSidebar, onNavigateToBlock }: Props) {
-  const rendered = parseContent(content, allPages, onNavigate, onOpenSidebar, onNavigateToBlock)
+export const SLIDER_REGEX = /\{\{(?:\[\[)?slider(?:\]\])?(?::(\d+))?\}\}/g
+export const SLIDER_MIN = 0
+export const SLIDER_MAX = 10
+
+export function replaceNthSlider(content: string, n: number, value: number): string {
+  let i = 0
+  return content.replace(SLIDER_REGEX, (match) => {
+    if (i++ === n) return `{{slider:${value}}}`
+    return match
+  })
+}
+
+export function BlockContent({ content, checked, allPages, onNavigate, onOpenSidebar, onNavigateToBlock, onSliderChange }: Props) {
+  const rendered = parseContent(content, allPages, onNavigate, onOpenSidebar, onNavigateToBlock, new Set(), onSliderChange, content)
 
   return (
     <span className={`block-content ${checked === true ? 'done' : ''}`}>
@@ -49,6 +62,7 @@ type Token =
   | { type: 'attribute'; key: string; value: string }
   | { type: 'heading'; level: number; value: string }
   | { type: 'encrypt'; value: string }
+  | { type: 'slider'; value: number; index: number }
 
 // Find a block by ID across all pages (recursive)
 function findBlockById(pages: Map<string, Page>, blockId: string): { block: import('../../shared/types').Block; page: Page } | null {
@@ -74,13 +88,16 @@ function parseContent(
   onOpenSidebar: (id: string) => void,
   onNavigateToBlock?: (pageId: string, pageTitle: string, blockId: string) => void,
   visitedBlockIds: Set<string> = new Set(),
+  onSliderChange?: (newContent: string) => void,
+  rootContent?: string,
 ): React.ReactNode[] {
   const tokens = tokenize(content)
-  return tokens.map((token, i) => renderToken(token, i, allPages, onNavigate, onOpenSidebar, onNavigateToBlock, visitedBlockIds))
+  return tokens.map((token, i) => renderToken(token, i, allPages, onNavigate, onOpenSidebar, onNavigateToBlock, visitedBlockIds, onSliderChange, rootContent ?? content))
 }
 
 function tokenize(text: string): Token[] {
   const tokens: Token[] = []
+  let sliderIndex = 0
 
   let remaining = text
 
@@ -112,6 +129,17 @@ function tokenize(text: string): Token[] {
     if (encryptMatch) {
       tokens.push({ type: 'encrypt', value: encryptMatch[1] })
       remaining = remaining.slice(encryptMatch[0].length)
+      continue
+    }
+
+    // {{slider}} / {{[[slider]]}} / {{slider:N}} / {{[[slider]]:N}}
+    const sliderMatch = remaining.match(/^\{\{(?:\[\[)?slider(?:\]\])?(?::(\d+))?\}\}/)
+    if (sliderMatch) {
+      const raw = sliderMatch[1]
+      const parsed = raw ? parseInt(raw, 10) : 5
+      const clamped = Math.max(0, Math.min(10, isNaN(parsed) ? 5 : parsed))
+      tokens.push({ type: 'slider', value: clamped, index: sliderIndex++ })
+      remaining = remaining.slice(sliderMatch[0].length)
       continue
     }
 
@@ -218,6 +246,8 @@ function renderToken(
   onOpenSidebar: (id: string) => void,
   onNavigateToBlock?: (pageId: string, pageTitle: string, blockId: string) => void,
   visitedBlockIds: Set<string> = new Set(),
+  onSliderChange?: (newContent: string) => void,
+  rootContent: string = '',
 ): React.ReactNode {
   switch (token.type) {
     case 'text':
@@ -388,7 +418,7 @@ function renderToken(
           >
             {token.key}:
           </a>
-          <span className="attr-value"> {parseContent(token.value, allPages, onNavigate, onOpenSidebar, onNavigateToBlock, visitedBlockIds)}</span>
+          <span className="attr-value"> {parseContent(token.value, allPages, onNavigate, onOpenSidebar, onNavigateToBlock, visitedBlockIds, onSliderChange, rootContent)}</span>
         </span>
       )
     }
@@ -401,7 +431,42 @@ function renderToken(
     case 'encrypt':
       return <span key={key} className="encrypted-inline">🔒 [encrypted]</span>
 
+    case 'slider':
+      return (
+        <SliderToken
+          key={key}
+          value={token.value}
+          onChange={(v) => {
+            if (!onSliderChange) return
+            onSliderChange(replaceNthSlider(rootContent, token.index, v))
+          }}
+          disabled={!onSliderChange}
+        />
+      )
+
     default:
       return null
   }
+}
+
+function SliderToken({ value, onChange, disabled }: { value: number; onChange: (v: number) => void; disabled: boolean }) {
+  const [local, setLocal] = React.useState(value)
+  React.useEffect(() => setLocal(value), [value])
+  return (
+    <span className="inline-slider" onClick={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()}>
+      <input
+        type="range"
+        min={SLIDER_MIN}
+        max={SLIDER_MAX}
+        step={1}
+        value={local}
+        disabled={disabled}
+        onChange={e => setLocal(parseInt(e.target.value, 10))}
+        onMouseUp={() => { if (!disabled && local !== value) onChange(local) }}
+        onTouchEnd={() => { if (!disabled && local !== value) onChange(local) }}
+        onKeyUp={() => { if (!disabled && local !== value) onChange(local) }}
+      />
+      <span className="inline-slider-value">{local}</span>
+    </span>
+  )
 }

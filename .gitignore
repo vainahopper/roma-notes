@@ -7,3 +7,5 @@ ios/App/App/public/
 .claude/
 .DS_Store
 *.dmg
+
+.superpowers/

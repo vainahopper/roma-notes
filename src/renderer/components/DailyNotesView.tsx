@@ -229,11 +229,11 @@ function DayEntry({ page, allPages, pagesVersion, onNavigate, onOpenSidebar, onZ
   const backlinks = useMemo(() => {
     const pageTitleLower = page.title.toLowerCase()
     const pageIdLower = page.id.toLowerCase()
-    const results: { page: Page; blocks: Block[] }[] = []
+    const results: { page: Page; matches: ReturnType<typeof findBlocksWithLink> }[] = []
     for (const [, p] of allPages) {
       if (p.id === page.id) continue
-      const matching = findBlocksWithLink(p.blocks, pageTitleLower, pageIdLower)
-      if (matching.length > 0) results.push({ page: p, blocks: matching })
+      const matches = findBlocksWithLink(p.blocks, pageTitleLower, pageIdLower)
+      if (matches.length > 0) results.push({ page: p, matches })
     }
     return results.sort(sortByPageDate)
   }, [page.id, page.title, allPages, pagesVersion])
