@@ -242,10 +242,12 @@ interface Props {
   onZoom?: (id: string, content: string) => void
   onNavigateToBlock?: (pageId: string, pageTitle: string, blockId: string) => void
   onBlur?: () => void
+  /** When set, this block enters edit mode (cursor at end) on first mount. */
+  initialFocusBlockId?: string
 }
 
-export function BlockEditor({ blocks, onChange, allPages, onNavigate, onOpenSidebar, scrollToBlockId, onClearScrollTarget, zoomedBlockId, onZoom, onNavigateToBlock, onBlur }: Props) {
-  const focusIdRef = useRef<string | null>(null)
+export function BlockEditor({ blocks, onChange, allPages, onNavigate, onOpenSidebar, scrollToBlockId, onClearScrollTarget, zoomedBlockId, onZoom, onNavigateToBlock, onBlur, initialFocusBlockId }: Props) {
+  const focusIdRef = useRef<string | null>(initialFocusBlockId ?? null)
   const editorRef = useRef<HTMLDivElement>(null)
   const dragGhostRef = useRef<HTMLDivElement>(null)
   const dropIndicatorRef = useRef<HTMLDivElement>(null)
