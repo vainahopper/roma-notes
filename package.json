@@ -1,6 +1,6 @@
 {
   "name": "roma-notes",
-  "version": "1.8.17",
+  "version": "1.8.18",
   "description": "A Roam Research-inspired note-taking app for macOS",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -72,6 +72,7 @@
   "license": "MIT",
   "devDependencies": {
     "@types/crypto-js": "^4.2.2",
+    "@types/d3-force": "^3.0.10",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.4",
@@ -90,6 +91,7 @@
     "@capacitor/ios": "^8.1.0",
     "adm-zip": "^0.5.16",
     "crypto-js": "^4.2.0",
+    "d3-force": "^3.0.0",
     "date-fns": "^4.1.0",
     "fuse.js": "^7.1.0",
     "react": "^19.2.4",

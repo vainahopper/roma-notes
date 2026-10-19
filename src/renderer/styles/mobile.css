@@ -138,9 +138,10 @@
     box-shadow: var(--shadow-lg);
   }
 
-  .sidebar-action-btn {
-    padding: 10px 12px;
-    font-size: 14px;
+  .sidebar-nav-item {
+    min-height: 42px;
+    padding: 9px 12px;
+    font-size: 15px;
   }
 
   .sidebar-section-header {

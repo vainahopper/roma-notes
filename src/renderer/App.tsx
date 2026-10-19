@@ -6,6 +6,9 @@ import { SearchModal } from './components/SearchModal'
 import { ImportModal } from './components/ImportModal'
 import { CalendarModal } from './components/CalendarModal'
 import { SettingsModal, type UiStyle } from './components/SettingsModal'
+import { AllPagesView } from './components/AllPagesView'
+import { GraphView } from './components/GraphView'
+import { ALL_PAGES_VIEW, GRAPH_VIEW, isSpecialView } from './utils/views'
 import { TitleBar } from './components/TitleBar'
 import { MobileBottomBar } from './components/MobileBottomBar'
 import { MobileKeyboardToolbar } from './components/MobileKeyboardToolbar'
@@ -236,6 +239,8 @@ export default function App() {
       if (event === 'menu:import') setShowImport(true)
       if (event === 'menu:search') setShowSearch(true)
       if (event === 'menu:settings') setShowSettings(true)
+      if (event === 'menu:all-pages') handleShowView(ALL_PAGES_VIEW)
+      if (event === 'menu:graph') handleShowView(GRAPH_VIEW)
     })
     return () => platform.removeMenuListeners()
   }, [])
@@ -458,6 +463,13 @@ export default function App() {
     setMainView('daily')
   }, [])
 
+  /** All Pages / Graph */
+  const handleShowView = useCallback((view: string) => {
+    setBlockZoom(null)
+    pushHistory(view)
+    setMainView(view)
+  }, [])
+
   const handleNewPage = useCallback(() => {
     setBlockZoom(null)
     const page = createNewPage('Untitled')
@@ -603,7 +615,7 @@ export default function App() {
     platform.getSettings().then((s: any) => platform.saveSettings({ ...s, starredOrder: newOrder }))
   }, [])
 
-  const activePageId = mainView !== 'daily' ? mainView : null
+  const activePageId = isSpecialView(mainView) ? null : mainView
   const activePage = activePageId ? store.pages.get(activePageId) : null
   const sidebarPage = sidebarPageId ? store.pages.get(sidebarPageId) : null
   const isDailyView = mainView === 'daily'
@@ -665,16 +677,14 @@ export default function App() {
                 handleShowDailyNotes()
                 if (window.innerWidth <= 768) setSidebarOpen(false)
               }}
-              onToday={() => {
-                handleToday()
+              onShowAllPages={() => {
+                handleShowView(ALL_PAGES_VIEW)
                 if (window.innerWidth <= 768) setSidebarOpen(false)
               }}
-              onNewPage={() => {
-                handleNewPage()
+              onShowGraph={() => {
+                handleShowView(GRAPH_VIEW)
                 if (window.innerWidth <= 768) setSidebarOpen(false)
               }}
-              onShowSearch={() => { setShowSearch(true); if (window.innerWidth <= 768) setSidebarOpen(false) }}
-              onShowCalendar={() => { setShowCalendar(true); if (window.innerWidth <= 768) setSidebarOpen(false) }}
               onShowSettings={() => { setShowSettings(true); if (window.innerWidth <= 768) setSidebarOpen(false) }}
               pagesExpanded={pagesExpanded}
               onTogglePagesExpanded={() => setPagesExpanded(e => {
@@ -697,7 +707,21 @@ export default function App() {
         )}
 
         <div className="app-main">
-          {isDailyView ? (
+          {mainView === ALL_PAGES_VIEW ? (
+            <AllPagesView
+              allPages={store.pages}
+              pagesVersion={store.pagesVersion}
+              onNavigate={handleNavigateToContent}
+              onOpenSidebar={handleOpenSidebar}
+            />
+          ) : mainView === GRAPH_VIEW ? (
+            <GraphView
+              allPages={store.pages}
+              pagesVersion={store.pagesVersion}
+              onNavigate={handleNavigateToContent}
+              onOpenSidebar={handleOpenSidebar}
+            />
+          ) : isDailyView ? (
             <DailyNotesView
               allPages={store.pages}
               pagesVersion={store.pagesVersion}

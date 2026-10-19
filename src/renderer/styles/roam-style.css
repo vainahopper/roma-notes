@@ -140,18 +140,9 @@
   background: var(--roam-sb-bg);
   border-right: none;
 }
-[data-style="roam"] .sidebar-actions {
-  gap: 2px;
-  padding: 12px 8px 8px;
-}
-[data-style="roam"] .sidebar-action-btn {
-  padding: 6px 8px;
-  font-size: 13px;
-  gap: 8px;
-  border-radius: var(--radius-sm);
-}
-[data-style="roam"] .sidebar-action-btn.primary.active,
-[data-style="roam"] .sidebar-action-btn.primary.active:hover {
+[data-style="roam"] .sidebar-nav { padding: 12px 8px 10px; }
+[data-style="roam"] .sidebar-nav-item.active,
+[data-style="roam"] .sidebar-nav-item.daily.active {
   background: var(--roam-sb-active);
   color: var(--roam-sb-text-strong);
 }
@@ -206,6 +197,9 @@
   line-height: 1.2;
 }
 [data-style="roam"] .day-entry { border-bottom: 1px solid var(--border-subtle); }
+/* Roam keeps day titles dark — the "Today" badge is the only highlight */
+[data-style="roam"] .is-today .day-fulldate,
+[data-style="roam"] .page-title.daily-title { color: var(--text-primary); }
 [data-style="roam"] .day-fulldate {
   font-weight: 700;
   letter-spacing: -0.015em;

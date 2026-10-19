@@ -527,6 +527,14 @@ function createWindow() {
           accelerator: 'CmdOrCtrl+K',
           click: () => win.webContents.send('menu:search'),
         },
+        {
+          label: 'All Pages',
+          click: () => win.webContents.send('menu:all-pages'),
+        },
+        {
+          label: 'Graph Overview',
+          click: () => win.webContents.send('menu:graph'),
+        },
         { type: 'separator' },
         { role: 'toggleDevTools' },
         { role: 'resetZoom' },
