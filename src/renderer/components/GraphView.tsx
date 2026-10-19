@@ -200,9 +200,19 @@ export function GraphView({ allPages, pagesVersion, onNavigate, onOpenSidebar }:
       .force('collide', forceCollide<GNode>(d => d.r + 2))
       .on('tick', () => { ticksRef.current++; requestDraw() })
       .on('end', () => { if (!userMovedRef.current) fitView() })
-    // An update only needs a gentle settle, not a full re-layout
-    if (isUpdate) sim.alpha(0.3)
     simRef.current = sim
+    if (isUpdate) {
+      // An update only needs a gentle, animated settle
+      sim.alpha(0.3)
+    } else {
+      // First layout: settle it before the first paint so the graph opens
+      // already placed and framed (no shrunken blob that jumps later)
+      sim.stop()
+      sim.tick(nodes.length > 2000 ? 120 : 300)
+      ticksRef.current = 300
+      if (!userMovedRef.current) fitView()
+      else requestDraw()
+    }
     return () => { sim.stop() }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [graph.signature])
@@ -219,7 +229,8 @@ export function GraphView({ allPages, pagesVersion, onNavigate, onOpenSidebar }:
       canvas.height = Math.round(height * dpr)
       canvas.style.width = `${width}px`
       canvas.style.height = `${height}px`
-      requestDraw()
+      if (!userMovedRef.current) fitView()
+      else requestDraw()
     })
     ro.observe(wrap)
     return () => ro.disconnect()
@@ -257,19 +268,6 @@ export function GraphView({ allPages, pagesVersion, onNavigate, onOpenSidebar }:
       }
       return best
     }
-    const zoomAt = (cx: number, cy: number, factor: number) => {
-      userMovedRef.current = true
-      const rect = canvas.getBoundingClientRect()
-      const { w, h } = sizeRef.current
-      const v = view.current
-      const k = Math.min(6, Math.max(0.1, v.k * factor))
-      const px = cx - rect.left - w / 2, py = cy - rect.top - h / 2
-      v.x = px - (px - v.x) * (k / v.k)
-      v.y = py - (py - v.y) * (k / v.k)
-      v.k = k
-      requestDraw()
-    }
-
     const pointers = new Map<number, { x: number; y: number }>()
     let dragNode: GNode | null = null
     let panning = false
@@ -279,19 +277,12 @@ export function GraphView({ allPages, pagesVersion, onNavigate, onOpenSidebar }:
 
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
-      // Trackpad pinch arrives as ctrl+wheel; a mouse wheel sends coarse,
-      // vertical-only steps. Both zoom. Trackpad two-finger scroll pans.
-      const isMouseWheel = e.deltaMode !== 0 || (e.deltaX === 0 && Math.abs(e.deltaY) >= 50 && Number.isInteger(e.deltaY))
-      if (e.ctrlKey || e.metaKey) {
-        zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.01))
-      } else if (isMouseWheel) {
-        zoomAt(e.clientX, e.clientY, e.deltaY < 0 ? 1.15 : 1 / 1.15)
-      } else {
-        userMovedRef.current = true
-        view.current.x -= e.deltaX
-        view.current.y -= e.deltaY
-        requestDraw()
-      }
+      // Like Roam: scrolling zooms around the cursor (mouse wheel, trackpad
+      // two-finger scroll and pinch), dragging the background pans.
+      const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY
+      const speed = e.ctrlKey ? 0.01 : 0.002   // pinch deltas are small
+      const factor = Math.exp(-Math.max(-150, Math.min(150, dy)) * speed)
+      zoomAt(e.clientX, e.clientY, factor)
     }
 
     const onPointerDown = (e: PointerEvent) => {
@@ -389,6 +380,23 @@ export function GraphView({ allPages, pagesVersion, onNavigate, onOpenSidebar }:
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onNavigate, onOpenSidebar])
 
+  /** Zoom by `factor`, keeping the point under (cx, cy) — or the centre — fixed */
+  function zoomAt(cx: number | null, cy: number | null, factor: number) {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    userMovedRef.current = true
+    const rect = canvas.getBoundingClientRect()
+    const { w, h } = sizeRef.current
+    const v = view.current
+    const k = Math.min(8, Math.max(0.05, v.k * factor))
+    const px = cx === null ? 0 : cx - rect.left - w / 2
+    const py = cy === null ? 0 : cy - rect.top - h / 2
+    v.x = px - (px - v.x) * (k / v.k)
+    v.y = py - (py - v.y) * (k / v.k)
+    v.k = k
+    requestDraw()
+  }
+
   /** Zoom/centre so every node is on screen */
   function fitView() {
     const nodes = nodesRef.current
@@ -424,10 +432,20 @@ export function GraphView({ allPages, pagesVersion, onNavigate, onOpenSidebar }:
           <input type="checkbox" checked={showOrphans} onChange={e => setShowOrphans(e.target.checked)} />
           Orphans
         </label>
-        <button className="graph-reset" onClick={resetView} title="Fit the whole graph on screen">Fit</button>
       </div>
       <div className="graph-canvas-wrap" ref={wrapRef}>
         <canvas ref={canvasRef} className="graph-canvas" />
+        <div className="graph-zoom-controls">
+          <button onClick={() => zoomAt(null, null, 1.3)} title="Zoom in">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1.5v9M1.5 6h9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+          </button>
+          <button onClick={() => zoomAt(null, null, 1 / 1.3)} title="Zoom out">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1.5 6h9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+          </button>
+          <button onClick={resetView} title="Fit the whole graph">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1.5 4.5v-3h3M7.5 1.5h3v3M10.5 7.5v3h-3M4.5 10.5h-3v-3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          </button>
+        </div>
         {stats.nodes === 0 && (
           <div className="graph-empty">No linked pages yet — link pages with [[…]] or #tags.</div>
         )}

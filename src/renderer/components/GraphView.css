@@ -38,15 +38,6 @@
   user-select: none;
 }
 
-.graph-reset {
-  padding: 4px 10px;
-  font-size: 12px;
-  border-radius: var(--radius-sm);
-  color: var(--text-secondary);
-  background: var(--bg-tertiary);
-}
-.graph-reset:hover { color: var(--text-primary); }
-
 .graph-canvas-wrap {
   position: relative;
   flex: 1;
@@ -75,4 +66,33 @@
 @media (max-width: 768px) {
   .graph-toolbar { gap: 10px; padding: 8px 12px; flex-wrap: wrap; }
   .graph-stats { display: none; }
+}
+
+/* Zoom controls (bottom-right), like Roam's graph */
+.graph-zoom-controls {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-normal);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+.graph-zoom-controls button {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+}
+.graph-zoom-controls button + button { border-top: 1px solid var(--border-subtle); }
+.graph-zoom-controls button:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+@media (max-width: 768px) {
+  .graph-zoom-controls { bottom: 12px; right: 12px; }
+  .graph-zoom-controls button { width: 40px; height: 40px; }
 }
