@@ -1,4 +1,4 @@
-# Roma Notes — CLAUDE.md
+# Roma Research (formerly Roma Notes) — CLAUDE.md
 
 ## What it is
 Roam Research-inspired note-taking app for macOS + iPhone. Single codebase.
@@ -82,7 +82,7 @@ manually via **Roma Notes > Check for Updates…**.
 `npm run deploy:ios` copies `dist/` to the iCloud container. The iPhone app
 detects the new version 5 seconds after launch and applies it (reloads).
 
-## Current version: 1.8.13
+## Current version: 1.8.16
 
 ## iPhone setup (one-time)
 1. In Xcode: select your Apple Developer Team (Signing & Capabilities)

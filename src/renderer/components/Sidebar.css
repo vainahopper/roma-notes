@@ -342,3 +342,27 @@
   border-radius: 1px;
   pointer-events: none;
 }
+
+/* Settings button + version row */
+.sidebar-bottom-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.sidebar-settings-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  color: var(--text-muted);
+  transition: background var(--transition), color var(--transition);
+}
+
+.sidebar-settings-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}

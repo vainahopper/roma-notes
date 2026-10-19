@@ -1,6 +1,6 @@
 {
   "appId": "com.codevainas.romanotes",
-  "appName": "Roma Notes",
+  "appName": "Roma Research",
   "webDir": "dist",
   "ios": {
     "contentInset": "never",

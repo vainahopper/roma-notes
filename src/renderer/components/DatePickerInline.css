@@ -10,8 +10,31 @@
 
 @media (max-width: 768px) {
   .date-picker-inline {
-    width: 280px;
-    border-radius: var(--radius-md) var(--radius-md) 0 0;
+    width: min(340px, calc(100vw - 16px));
+    padding: 10px;
+    touch-action: manipulation;  /* no double-tap zoom delay on the buttons */
+    -webkit-tap-highlight-color: transparent;
+  }
+  .date-picker-inline .dp-nav {
+    width: 44px;
+    height: 44px;
+    font-size: 24px;
+  }
+  .date-picker-inline .dp-month-label { font-size: 16px; }
+  .date-picker-inline .dp-day-label { font-size: 11px; padding: 4px 0; }
+  .date-picker-inline .dp-cell {
+    aspect-ratio: auto;
+    height: 40px;
+    font-size: 15px;
+  }
+  .date-picker-inline .dp-nav:active,
+  .date-picker-inline .dp-cell:active:not(.dp-empty) {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+  .date-picker-inline .dp-today-btn {
+    font-size: 14px;
+    padding: 10px 24px;
   }
 }
 
@@ -23,6 +46,7 @@
 }
 
 .dp-nav {
+  flex-shrink: 0;
   width: 24px;
   height: 24px;
   display: flex;

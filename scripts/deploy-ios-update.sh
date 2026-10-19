@@ -22,7 +22,7 @@ DIST_DIR="$(dirname "$0")/../dist"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VERSION=$(node -p "require('${SCRIPT_DIR}/../package.json').version")
 
-echo "Deploying Roma Notes v${VERSION} to iCloud for iPhone..."
+echo "Deploying Roma Research v${VERSION} to iCloud for iPhone..."
 
 # Ensure iCloud container exists
 mkdir -p "$ICLOUD_CONTAINER"

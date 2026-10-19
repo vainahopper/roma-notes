@@ -67,7 +67,7 @@ export function TitleBar({
       </div>
 
       <div className="titlebar-center">
-        <span className="app-name">Roma Notes</span>
+        <span className="app-name">Roma Research</span>
         <span className="titlebar-version">v{__APP_VERSION__}</span>
       </div>
 

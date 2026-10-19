@@ -24,13 +24,13 @@ contextBridge.exposeInMainWorld('api', {
 
   // Menu events
   onMenuEvent: (callback) => {
-    const events = ['menu:new-page', 'menu:today', 'menu:import', 'menu:search']
+    const events = ['menu:new-page', 'menu:today', 'menu:import', 'menu:search', 'menu:settings']
     events.forEach(event => {
       ipcRenderer.on(event, (_, ...args) => callback(event, ...args))
     })
   },
   removeMenuListeners: () => {
-    const events = ['menu:new-page', 'menu:today', 'menu:import', 'menu:search']
+    const events = ['menu:new-page', 'menu:today', 'menu:import', 'menu:search', 'menu:settings']
     events.forEach(event => ipcRenderer.removeAllListeners(event))
   },
 

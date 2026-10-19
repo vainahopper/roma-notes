@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useRef, Fragment } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef, Fragment } from 'react'
 import type { Page, Block, ZoomFrame } from '../../shared/types'
 import { BlockEditor } from './BlockEditor'
 import { BlockContent } from './BlockContent'
@@ -32,13 +32,17 @@ interface Props {
   onNavigateToBlock?: (pageId: string, pageTitle: string, blockId: string) => void
   onToggleStar?: () => void
   initialZoom?: ZoomFrame[] | null
+  /** Day pages only: open the Daily Notes feed scrolled to this day */
+  onShowInDailyNotes?: (pageId: string) => void
+  /** Called when the user zooms in/out inside the page, so it can become a history entry */
+  onZoomChange?: (stack: ZoomFrame[]) => void
 }
 
 // Pages whose title triggers special linked-refs treatment
 const TODO_PAGE_TITLES = ['todo', 'todos', 'tasks']
 const DONE_PAGE_TITLES = ['done']
 
-export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDeleted, isSidebar = false, scrollToBlockId, onClearScrollTarget, onNavigateToBlock, onToggleStar, initialZoom }: Props) {
+export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDeleted, isSidebar = false, scrollToBlockId, onClearScrollTarget, onNavigateToBlock, onToggleStar, initialZoom, onShowInDailyNotes, onZoomChange }: Props) {
   const { pagesVersion } = useStore()
   const [blocks, setBlocks] = useState<Block[]>(page.blocks)
   const [title, setTitle] = useState(page.title)
@@ -53,14 +57,24 @@ export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDele
   const [zoomStack, setZoomStack] = useState<ZoomFrame[]>(initialZoom ?? [])
   const zoomedBlockId = zoomStack.length > 0 ? zoomStack[zoomStack.length - 1].blockId : null
 
+  // Back/forward hands us a different zoom for the same page — follow it
+  const initialZoomKey = initialZoom?.map(f => f.blockId).join('>') ?? ''
+  useEffect(() => {
+    setZoomStack(initialZoom ?? [])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialZoomKey])
+
   const handleZoom = useCallback((blockId: string, blockContent: string) => {
-    setZoomStack(prev => [...prev, { blockId, blockContent }])
-  }, [])
+    const next = [...zoomStack, { blockId, blockContent }]
+    setZoomStack(next)
+    onZoomChange?.(next)
+  }, [zoomStack, onZoomChange])
 
   const handleBreadcrumbNav = useCallback((index: number) => {
-    if (index < 0) setZoomStack([])
-    else setZoomStack(prev => prev.slice(0, index + 1))
-  }, [])
+    const next = index < 0 ? [] : zoomStack.slice(0, index + 1)
+    setZoomStack(next)
+    onZoomChange?.(next)
+  }, [zoomStack, onZoomChange])
 
 
   const isDaily = page.isDaily || isDatePage(page.title)
@@ -335,6 +349,21 @@ export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDele
             </>
           )}
         </div>
+        {isDaily && !isSidebar && onShowInDailyNotes && (
+          <button
+            className="page-daily-feed-link"
+            onClick={() => onShowInDailyNotes(page.id)}
+            title="Show this day in the Daily Notes feed"
+          >
+            <svg width="11" height="11" viewBox="0 0 15 15" fill="none">
+              <rect x="2" y="1" width="11" height="13" rx="1.5" stroke="currentColor" strokeWidth="1.3"/>
+              <line x1="5" y1="5" x2="10" y2="5" stroke="currentColor" strokeWidth="1.2"/>
+              <line x1="5" y1="8" x2="10" y2="8" stroke="currentColor" strokeWidth="1.2"/>
+              <line x1="5" y1="11" x2="8" y2="11" stroke="currentColor" strokeWidth="1.2"/>
+            </svg>
+            View in Daily Notes
+          </button>
+        )}
       </div>
       )}
 

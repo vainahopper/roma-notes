@@ -1,0 +1,387 @@
+/* Roma Notes – "Roam" style
+   Roam Research-inspired look (Blueprint slate palette, dark sidebar, crisp
+   blue links) with more refined, proportioned menus and popovers.
+   Everything is scoped under [data-style="roam"] so the default Roma style is
+   untouched. Selectors use :root[...] to out-rank globals.css theme blocks. */
+
+/* ─── Tokens: light ─────────────────────────────────────────── */
+:root[data-style="roam"],
+:root[data-style="roam"][data-theme="light"] {
+  --bg-primary: #ffffff;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #f5f8fa;
+  --bg-glass: #ffffff;
+  --bg-hover: rgba(167, 182, 194, 0.18);
+  --bg-active: rgba(167, 182, 194, 0.30);
+  --bg-selected: rgba(19, 124, 189, 0.10);
+
+  --border-subtle: #e1e8ed;
+  --border-normal: #ced9e0;
+
+  --text-primary: #202b33;
+  --text-secondary: #394b59;
+  --text-tertiary: #5c7080;
+  --text-muted: #8a9ba8;
+
+  --accent: #137cbd;
+  --accent-hover: #106ba3;
+  --accent-dim: rgba(19, 124, 189, 0.16);
+
+  --link: #106ba3;
+  --link-hover: #0e5a8a;
+
+  --roam-bullet: #5c7080;
+  --roam-guide: #e1e8ed;
+  --roam-ref: #ff9e1a;
+  --roam-tag-bg: #ebf1f5;
+  --roam-highlight: #fff3b0;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+
+  --shadow-sm: 0 0 0 1px rgba(16, 22, 26, 0.10), 0 1px 1px rgba(16, 22, 26, 0.12);
+  --shadow-md: 0 0 0 1px rgba(16, 22, 26, 0.10), 0 2px 4px rgba(16, 22, 26, 0.16), 0 8px 24px rgba(16, 22, 26, 0.12);
+  --shadow-lg: 0 0 0 1px rgba(16, 22, 26, 0.10), 0 4px 8px rgba(16, 22, 26, 0.14), 0 18px 46px 6px rgba(16, 22, 26, 0.14);
+
+  /* Left sidebar (Roam's dark slate column) */
+  --roam-sb-bg: #293742;
+  --roam-sb-text: #ced9e0;
+  --roam-sb-text-strong: #f5f8fa;
+  --roam-sb-muted: #8a9ba8;
+  --roam-sb-hover: rgba(255, 255, 255, 0.07);
+  --roam-sb-active: rgba(255, 255, 255, 0.12);
+  --roam-sb-border: rgba(255, 255, 255, 0.06);
+}
+
+/* ─── Tokens: dark ──────────────────────────────────────────── */
+:root[data-style="roam"][data-theme="dark"] {
+  --bg-primary: #202b33;
+  --bg-secondary: #26333d;
+  --bg-tertiary: #2d3c48;
+  --bg-glass: #202b33;
+  --bg-hover: rgba(138, 155, 168, 0.15);
+  --bg-active: rgba(138, 155, 168, 0.25);
+  --bg-selected: rgba(72, 175, 240, 0.14);
+
+  --border-subtle: #30404d;
+  --border-normal: #394b59;
+
+  --text-primary: #f5f8fa;
+  --text-secondary: #bfccd6;
+  --text-tertiary: #a7b6c2;
+  --text-muted: #738694;
+
+  --accent: #48aff0;
+  --accent-hover: #6cc0f5;
+  --accent-dim: rgba(72, 175, 240, 0.22);
+
+  --link: #48aff0;
+  --link-hover: #8ccff8;
+
+  --roam-bullet: #a7b6c2;
+  --roam-guide: #394b59;
+  --roam-tag-bg: #30404d;
+  --roam-highlight: rgba(255, 199, 0, 0.30);
+
+  --shadow-sm: 0 0 0 1px rgba(16, 22, 26, 0.4), 0 1px 1px rgba(16, 22, 26, 0.4);
+  --shadow-md: 0 0 0 1px rgba(16, 22, 26, 0.3), 0 2px 4px rgba(16, 22, 26, 0.4), 0 8px 24px rgba(16, 22, 26, 0.4);
+  --shadow-lg: 0 0 0 1px rgba(16, 22, 26, 0.3), 0 4px 8px rgba(16, 22, 26, 0.4), 0 18px 46px 6px rgba(16, 22, 26, 0.4);
+
+  --roam-sb-bg: #182026;
+  --roam-sb-border: rgba(255, 255, 255, 0.05);
+}
+
+/* ─── Title bar ─────────────────────────────────────────────── */
+[data-style="roam"] .titlebar {
+  height: 46px;
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--border-subtle);
+}
+[data-style="roam"] .titlebar-btn {
+  width: 28px;
+  height: 28px;
+  color: var(--text-tertiary);
+}
+[data-style="roam"] .titlebar-btn.active {
+  background: var(--bg-active);
+  color: var(--text-primary);
+}
+
+/* ─── Left sidebar: dark slate column ──────────────────────── */
+[data-style="roam"] .sidebar {
+  /* Re-scope tokens so every child component picks up the dark column */
+  --text-primary: var(--roam-sb-text-strong);
+  --text-secondary: var(--roam-sb-text);
+  --text-muted: var(--roam-sb-muted);
+  --bg-hover: var(--roam-sb-hover);
+  --bg-active: var(--roam-sb-active);
+  --bg-selected: var(--roam-sb-active);
+  --bg-tertiary: rgba(255, 255, 255, 0.08);
+  --border-subtle: var(--roam-sb-border);
+  --accent: var(--roam-sb-text-strong);
+  --accent-dim: var(--roam-sb-active);
+
+  background: var(--roam-sb-bg);
+  border-right: none;
+}
+[data-style="roam"] .sidebar-actions {
+  gap: 2px;
+  padding: 12px 8px 8px;
+}
+[data-style="roam"] .sidebar-action-btn {
+  padding: 6px 8px;
+  font-size: 13px;
+  gap: 8px;
+  border-radius: var(--radius-sm);
+}
+[data-style="roam"] .sidebar-action-btn.primary.active,
+[data-style="roam"] .sidebar-action-btn.primary.active:hover {
+  background: var(--roam-sb-active);
+  color: var(--roam-sb-text-strong);
+}
+[data-style="roam"] .sidebar-filter {
+  margin: 4px 10px 8px;
+  padding: 5px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.06);
+}
+[data-style="roam"] .sidebar-section-header {
+  padding: 10px 18px 4px;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+}
+[data-style="roam"] .sidebar-section-header:hover { color: var(--roam-sb-text); }
+[data-style="roam"] .sidebar-items { padding: 0 8px; }
+[data-style="roam"] .sidebar-item {
+  min-height: 26px;
+  padding: 3px 10px;
+  font-size: 13px;
+  border-radius: var(--radius-sm);
+}
+[data-style="roam"] .sidebar-item.active {
+  background: var(--roam-sb-active);
+  color: var(--roam-sb-text-strong);
+}
+[data-style="roam"] .sidebar-bottom { border-top-color: var(--roam-sb-border); }
+
+/* ─── Right sidebar ─────────────────────────────────────────── */
+[data-style="roam"] .app-right-sidebar {
+  background: var(--bg-tertiary);
+  border-left: 1px solid var(--border-subtle);
+}
+[data-style="roam"] .right-sidebar-header {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* ─── Page + daily notes ───────────────────────────────────── */
+[data-style="roam"] .page-content { padding: 28px 64px 48px; max-width: 900px; }
+[data-style="roam"] .page-title {
+  font-size: 36px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+[data-style="roam"] .is-sidebar .page-title { font-size: 22px; }
+
+[data-style="roam"] .day-entry {
+  padding: 36px 0 32px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+[data-style="roam"] .day-fulldate {
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+[data-style="roam"] .day-entry-date:hover .day-fulldate { color: var(--text-primary); }
+
+/* ─── Blocks ────────────────────────────────────────────────── */
+[data-style="roam"] .block-row { min-height: 27px; }
+[data-style="roam"] .block-rendered,
+[data-style="roam"] .block-textarea {
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text-primary);
+}
+[data-style="roam"] .block-bullet-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--roam-bullet);
+}
+[data-style="roam"] .block-bullet:hover .block-bullet-dot {
+  background: var(--text-primary);
+  transform: scale(1.15);
+}
+[data-style="roam"] .block-row.collapsed .block-bullet-dot,
+[data-style="roam"] .block-row.collapsed .block-bullet:hover .block-bullet-dot {
+  background: var(--roam-bullet);
+  box-shadow: 0 0 0 3px var(--border-normal);
+}
+[data-style="roam"] .block-item:has(> .block-children)::before {
+  width: 1px;
+  background: var(--roam-guide);
+}
+[data-style="roam"] .block-item.block-selected > .block-row {
+  background: var(--accent-dim);
+}
+
+/* Inline syntax */
+[data-style="roam"] .wikilink.exists,
+[data-style="roam"] .wikilink.new {
+  color: var(--link);
+  background: transparent;
+  padding: 0;
+}
+[data-style="roam"] .wikilink.exists:hover,
+[data-style="roam"] .wikilink.new:hover {
+  color: var(--link-hover);
+  background: transparent;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+[data-style="roam"] .wikilink-brackets {
+  color: var(--text-muted);
+  opacity: 1;
+  font-size: 1em;
+}
+[data-style="roam"] .tag {
+  color: var(--text-tertiary);
+  opacity: 1;
+  font-size: 0.93em;
+  padding: 0 1px;
+}
+[data-style="roam"] .tag:hover { color: var(--link); }
+
+[data-style="roam"] .block-ref-found {
+  color: inherit;
+  background: transparent;
+  border-bottom: 1px solid var(--roam-ref);
+  border-radius: 0;
+  padding: 0;
+}
+[data-style="roam"] .block-ref-found:hover {
+  color: inherit;
+  background: rgba(255, 158, 26, 0.10);
+}
+[data-style="roam"] .block-ref-children { border-left-color: var(--roam-ref); }
+
+[data-style="roam"] .block-rendered mark,
+[data-style="roam"] .block-content mark {
+  background: var(--roam-highlight);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 2px;
+}
+[data-style="roam"] .block-rendered code,
+[data-style="roam"] .block-content code {
+  font-size: 0.86em;
+  color: #db3737;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+[data-style="roam"][data-theme="dark"] .block-rendered code,
+[data-style="roam"][data-theme="dark"] .block-content code { color: #ff7373; }
+
+/* Linked references */
+[data-style="roam"] .linked-refs-header {
+  font-size: 13px;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* ─── Menus & popovers: refined + proportioned ─────────────── */
+[data-style="roam"] .slash-menu,
+[data-style="roam"] .wikilink-autocomplete {
+  min-width: 240px;
+  max-width: 320px;
+  padding: 4px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  box-shadow: var(--shadow-md);
+}
+[data-style="roam"] .slash-menu-header {
+  padding: 6px 8px 4px;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+[data-style="roam"] .slash-menu-item,
+[data-style="roam"] .autocomplete-item {
+  gap: 8px;
+  padding: 5px 8px;
+  min-height: 30px;
+  font-size: 13px;
+  border-radius: var(--radius-sm);
+}
+[data-style="roam"] .slash-icon {
+  width: 20px;
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+[data-style="roam"] .slash-label { font-size: 13px; font-weight: 500; }
+[data-style="roam"] .slash-desc { font-size: 11px; color: var(--text-muted); }
+[data-style="roam"] .slash-menu-item:hover,
+[data-style="roam"] .slash-menu-item.selected,
+[data-style="roam"] .autocomplete-item:hover,
+[data-style="roam"] .autocomplete-item.selected {
+  background: var(--accent);
+  color: #fff;
+}
+[data-style="roam"] .slash-menu-item:hover *,
+[data-style="roam"] .slash-menu-item.selected *,
+[data-style="roam"] .autocomplete-item:hover *,
+[data-style="roam"] .autocomplete-item.selected * {
+  color: #fff;
+}
+
+/* Search (⌘K) */
+[data-style="roam"] .search-overlay {
+  background: rgba(16, 22, 26, 0.35);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  padding-top: 12vh;
+}
+[data-style="roam"] .search-modal {
+  width: 560px;
+  border: none;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+[data-style="roam"] .search-input { font-size: 16px; }
+[data-style="roam"] .search-section-label {
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+}
+[data-style="roam"] .search-result { border-radius: var(--radius-sm); }
+[data-style="roam"] .search-result.selected,
+[data-style="roam"] .search-result:hover { background: var(--bg-selected); }
+
+/* Generic modals (encrypt / delete / calendar) */
+[data-style="roam"] .modal-overlay {
+  background: rgba(16, 22, 26, 0.35);
+  backdrop-filter: none;
+}
+[data-style="roam"] .modal-box {
+  border: none;
+  border-radius: var(--radius-lg);
+  padding: 22px;
+  box-shadow: var(--shadow-lg);
+}
+[data-style="roam"] .modal-input { border-radius: var(--radius-sm); }
+
+/* Settings modal itself */
+[data-style="roam"] .settings-modal {
+  border: none;
+  border-radius: var(--radius-lg);
+}
+[data-style="roam"] .settings-overlay { background: rgba(16, 22, 26, 0.35); }

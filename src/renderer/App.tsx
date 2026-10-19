@@ -5,6 +5,7 @@ import { DailyNotesView } from './components/DailyNotesView'
 import { SearchModal } from './components/SearchModal'
 import { ImportModal } from './components/ImportModal'
 import { CalendarModal } from './components/CalendarModal'
+import { SettingsModal, type UiStyle } from './components/SettingsModal'
 import { TitleBar } from './components/TitleBar'
 import { MobileBottomBar } from './components/MobileBottomBar'
 import { MobileKeyboardToolbar } from './components/MobileKeyboardToolbar'
@@ -15,6 +16,7 @@ import type { Block, ZoomFrame } from '../shared/types'
 import { platform } from './platform'
 import './styles/app.css'
 import './styles/mobile.css'
+import './styles/roam-style.css'
 
 type MainView = 'daily' | string
 type ThemeMode = 'dark' | 'light' | 'system'
@@ -47,6 +49,8 @@ export default function App() {
   const [showImport, setShowImport] = useState(false)
   const [showCalendar, setShowCalendar] = useState(false)
   const [themeMode, setThemeMode] = useState<ThemeMode>('system')
+  const [uiStyle, setUiStyle] = useState<UiStyle>('roma')
+  const [showSettings, setShowSettings] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth > 768)
   const [pagesExpanded, setPagesExpanded] = useState(true)
   const [updateInfo, setUpdateInfo] = useState<{ version: string } | null>(null)
@@ -59,38 +63,98 @@ export default function App() {
   // Track last known date to detect day changes on focus
   const lastKnownDateRef = useRef(todayPageId())
 
-  // Navigation history for back/forward
-  const historyRef = useRef<MainView[]>(['daily'])
+  // Navigation history for back/forward (Roam-style: a block zoom is its own
+  // entry, and going back restores where you were scrolled).
+  type HistoryEntry = {
+    view: MainView
+    zoom: ZoomFrame[] | null
+    scrollTop?: number      // page views
+    feedDayId?: string      // daily feed: day at the top of the viewport
+  }
+  const historyRef = useRef<HistoryEntry[]>([{ view: 'daily', zoom: null }])
   const historyIdxRef = useRef(0)
   const [canBack, setCanBack] = useState(false)
   const [canForward, setCanForward] = useState(false)
+  const [restoreScroll, setRestoreScroll] = useState<{ top: number } | null>(null)
 
-  function pushHistory(view: MainView) {
+  /** Remember the scroll position of the entry we're leaving */
+  function saveCurrentScroll() {
+    const entry = historyRef.current[historyIdxRef.current]
+    if (!entry) return
+    const feed = document.querySelector<HTMLElement>('.app-main .daily-notes-view')
+    if (feed) {
+      const top = feed.getBoundingClientRect().top
+      const days = Array.from(feed.querySelectorAll<HTMLElement>('.day-entry'))
+      const visible = days.find(d => d.getBoundingClientRect().bottom > top + 40)
+      entry.feedDayId = visible?.id.replace(/^daily-/, '')
+      return
+    }
+    const scroller = document.querySelector<HTMLElement>('.app-main .page-scroll')
+    entry.scrollTop = scroller?.scrollTop ?? 0
+  }
+
+  function pushHistory(view: MainView, zoom: ZoomFrame[] | null = null) {
+    saveCurrentScroll()
     const history = historyRef.current.slice(0, historyIdxRef.current + 1)
-    history.push(view)
+    history.push({ view, zoom })
     historyRef.current = history
     historyIdxRef.current = history.length - 1
     setCanBack(historyIdxRef.current > 0)
     setCanForward(false)
   }
 
+  function applyHistoryEntry(entry: HistoryEntry) {
+    setMainView(entry.view)
+    setBlockZoom(entry.zoom)
+    if (entry.view === 'daily') {
+      if (entry.feedDayId) {
+        setScrollToDate(entry.feedDayId)
+        setTimeout(() => setScrollToDate(null), 600)
+      }
+    } else {
+      setRestoreScroll({ top: entry.scrollTop ?? 0 })
+    }
+  }
+
   function goBack() {
     if (historyIdxRef.current <= 0) return
+    saveCurrentScroll()
     historyIdxRef.current -= 1
-    const view = historyRef.current[historyIdxRef.current]
-    setMainView(view)
+    applyHistoryEntry(historyRef.current[historyIdxRef.current])
     setCanBack(historyIdxRef.current > 0)
     setCanForward(true)
   }
 
   function goForward() {
     if (historyIdxRef.current >= historyRef.current.length - 1) return
+    saveCurrentScroll()
     historyIdxRef.current += 1
-    const view = historyRef.current[historyIdxRef.current]
-    setMainView(view)
+    applyHistoryEntry(historyRef.current[historyIdxRef.current])
     setCanBack(true)
     setCanForward(historyIdxRef.current < historyRef.current.length - 1)
   }
+
+  // Restore a page's scroll position after back/forward has rendered it
+  useEffect(() => {
+    if (!restoreScroll) return
+    const id = requestAnimationFrame(() => requestAnimationFrame(() => {
+      const scroller = document.querySelector<HTMLElement>('.app-main .page-scroll')
+      if (scroller) scroller.scrollTop = restoreScroll.top
+      setRestoreScroll(null)
+    }))
+    return () => cancelAnimationFrame(id)
+  }, [restoreScroll])
+
+  // Mouse back/forward buttons (buttons 3 / 4), like a browser
+  useEffect(() => {
+    const onMouseUp = (e: MouseEvent) => {
+      if (e.button === 3) { e.preventDefault(); goBack() }
+      if (e.button === 4) { e.preventDefault(); goForward() }
+    }
+    window.addEventListener('mouseup', onMouseUp)
+    return () => window.removeEventListener('mouseup', onMouseUp)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Load pages + saved theme on startup
   useEffect(() => {
@@ -101,6 +165,7 @@ export default function App() {
     // Load saved theme + UI state
     platform.getSettings().then((settings: any) => {
       if (settings?.theme) setThemeMode(settings.theme)
+      if (settings?.uiStyle === 'roam' || settings?.uiStyle === 'roma') setUiStyle(settings.uiStyle)
       if (settings?.sidebarOpen !== undefined && window.innerWidth > 768) setSidebarOpen(settings.sidebarOpen)
       if (settings?.pagesExpanded !== undefined) setPagesExpanded(settings.pagesExpanded)
       if (Array.isArray(settings?.starredOrder)) setStarredOrder(settings.starredOrder)
@@ -148,6 +213,21 @@ export default function App() {
     }
   }, [themeMode])
 
+  // Apply UI style (Roma default / Roam-inspired) as a root attribute
+  useEffect(() => {
+    document.documentElement.setAttribute('data-style', uiStyle)
+  }, [uiStyle])
+
+  const handleChangeTheme = useCallback((next: ThemeMode) => {
+    setThemeMode(next)
+    platform.getSettings().then((s: any) => platform.saveSettings({ ...s, theme: next }))
+  }, [])
+
+  const handleChangeStyle = useCallback((next: UiStyle) => {
+    setUiStyle(next)
+    platform.getSettings().then((s: any) => platform.saveSettings({ ...s, uiStyle: next }))
+  }, [])
+
   const handleToggleTheme = useCallback(() => {
     setThemeMode(prev => {
       const next: ThemeMode = prev === 'dark' ? 'light' : prev === 'light' ? 'system' : 'dark'
@@ -165,6 +245,7 @@ export default function App() {
       if (event === 'menu:today') handleToday()
       if (event === 'menu:import') setShowImport(true)
       if (event === 'menu:search') setShowSearch(true)
+      if (event === 'menu:settings') setShowSettings(true)
     })
     return () => platform.removeMenuListeners()
   }, [])
@@ -394,7 +475,7 @@ export default function App() {
     setMainView(page.id)
   }, [])
 
-  const handleNavigateTo = useCallback((pageId: string, pageTitle?: string, openStandalone = false, keepZoom = false) => {
+  const handleNavigateTo = useCallback((pageId: string, pageTitle?: string, openStandalone = false, zoom: ZoomFrame[] | null = null) => {
     let page = store.pages.get(pageId)
     let actualPageId = pageId
 
@@ -418,7 +499,7 @@ export default function App() {
     if (isDaily) {
       if (openStandalone) {
         if (pageTitle) getOrCreateDailyPage(pageId, pageTitle)
-        pushHistory(pageId)
+        pushHistory(pageId, zoom)
         setMainView(pageId)
       } else {
         if (pageTitle) getOrCreateDailyPage(pageId, pageTitle)
@@ -429,10 +510,10 @@ export default function App() {
       }
     } else {
       if (!page && pageTitle) createNewPage(pageTitle, pageId)
-      pushHistory(actualPageId)
+      pushHistory(actualPageId, zoom)
       setMainView(actualPageId)
     }
-    if (!keepZoom) setBlockZoom(null)
+    setBlockZoom(zoom)
 
     // Track visit history in localStorage for search "Recent" ordering
     try {
@@ -447,8 +528,7 @@ export default function App() {
   const handleZoomToBlock = useCallback((pageId: string, pageTitle: string, blockId: string) => {
     const page = store.pages.get(pageId)
     const path = page ? findBlockPath(blockId, page.blocks) : null
-    setBlockZoom(path ?? [{ blockId, blockContent: '' }])
-    handleNavigateTo(pageId, pageTitle, true, true)
+    handleNavigateTo(pageId, pageTitle, true, path ?? [{ blockId, blockContent: '' }])
   }, [store.pages, handleNavigateTo])
 
   const handleNavigateToContent = useCallback((pageId: string, pageTitle?: string) => {
@@ -605,6 +685,7 @@ export default function App() {
               }}
               onShowSearch={() => { setShowSearch(true); if (window.innerWidth <= 768) setSidebarOpen(false) }}
               onShowCalendar={() => { setShowCalendar(true); if (window.innerWidth <= 768) setSidebarOpen(false) }}
+              onShowSettings={() => { setShowSettings(true); if (window.innerWidth <= 768) setSidebarOpen(false) }}
               pagesExpanded={pagesExpanded}
               onTogglePagesExpanded={() => setPagesExpanded(e => {
                 const next = !e
@@ -648,11 +729,17 @@ export default function App() {
               onNavigateToBlock={handleNavigateToBlock}
               onToggleStar={() => handleToggleStar(activePage.id)}
               initialZoom={blockZoom}
+              onShowInDailyNotes={id => handleNavigateTo(id, activePage.title, false)}
+              onZoomChange={stack => {
+                const zoom = stack.length > 0 ? stack : null
+                setBlockZoom(zoom)
+                pushHistory(activePage.id, zoom)
+              }}
             />
           ) : (
             <div className="app-empty">
               <div className="empty-icon">📝</div>
-              <h2>Roma Notes</h2>
+              <h2>Roma Research</h2>
               <p>Press <kbd>⌘N</kbd> to create a new page</p>
             </div>
           )}
@@ -687,6 +774,16 @@ export default function App() {
       )}
 
       {showImport && <ImportModal onClose={() => setShowImport(false)} />}
+
+      {showSettings && (
+        <SettingsModal
+          themeMode={themeMode}
+          uiStyle={uiStyle}
+          onChangeTheme={handleChangeTheme}
+          onChangeStyle={handleChangeStyle}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
 
       {showCalendar && (
         <CalendarModal

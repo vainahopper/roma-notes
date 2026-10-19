@@ -1,29 +1,36 @@
+/* Transparent click-catcher: the calendar floats as a popover over the page
+   instead of dimming/blurring everything behind it. */
 .calendar-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.5);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: transparent;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
+  padding-top: 72px;
   z-index: 900;
 }
 
 .calendar-modal {
   background: var(--bg-secondary);
   border: 1px solid var(--border-normal);
-  border-radius: var(--radius-xl);
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
-  padding: 24px;
-  width: 340px;
+  padding: 16px;
+  width: 300px;
+  animation: calendar-pop 120ms ease-out;
+}
+
+@keyframes calendar-pop {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to   { opacity: 1; transform: none; }
 }
 
 .calendar-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 20px;
+  margin-bottom: 12px;
 }
 
 .cal-month-label {

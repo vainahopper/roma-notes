@@ -1,4 +1,4 @@
-# Roma Notes
+# Roma Research
 
 A Roam Research-inspired note-taking app for macOS (Apple Silicon).
 

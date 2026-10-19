@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-        <string>Roma Notes</string>
+        <string>Roma Research</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -48,7 +48,7 @@
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
 	<key>NSFaceIDUsageDescription</key>
-	<string>Roma Notes uses Face ID to unlock encrypted blocks.</string>
+	<string>Roma Research uses Face ID to unlock encrypted blocks.</string>
 	<key>NSUbiquitousContainers</key>
 	<dict>
 		<key>iCloud.com.codevainas.romanotes</key>
@@ -56,7 +56,7 @@
 			<key>NSUbiquitousContainerIsDocumentScopePublic</key>
 			<true/>
 			<key>NSUbiquitousContainerName</key>
-			<string>Roma Notes</string>
+			<string>Roma Research</string>
 			<key>NSUbiquitousContainerSupportedFolderLevels</key>
 			<string>Any</string>
 		</dict>

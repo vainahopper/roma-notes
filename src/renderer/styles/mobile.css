@@ -333,10 +333,6 @@
     -webkit-overflow-scrolling: touch;
   }
 
-  .daily-notes-header {
-    padding: 20px 16px 0;
-  }
-
   .daily-notes-list {
     padding: 0 16px 160px;
   }

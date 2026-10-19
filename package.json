@@ -1,6 +1,6 @@
 {
   "name": "roma-notes",
-  "version": "1.8.13",
+  "version": "1.8.16",
   "description": "A Roam Research-inspired note-taking app for macOS",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -18,7 +18,7 @@
   },
   "build": {
     "appId": "com.codevainas.roma-notes",
-    "productName": "Roma Notes",
+    "productName": "Roma Research",
     "asar": true,
     "directories": {
       "output": "release"
@@ -47,8 +47,8 @@
       ]
     },
     "dmg": {
-      "title": "Roma Notes",
-      "artifactName": "Roma Notes.dmg",
+      "title": "Roma Research",
+      "artifactName": "Roma Research.dmg",
       "contents": [
         {
           "x": 130,

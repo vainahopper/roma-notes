@@ -256,3 +256,19 @@
 .modal-btn.secondary:hover { background: var(--bg-active); }
 .modal-btn.danger { background: var(--red); color: white; }
 .modal-btn.danger:hover { background: #dc2626; }
+
+/* Subtle "View in Daily Notes" link under a day page's title */
+.page-daily-feed-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
+  padding: 2px 6px 2px 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  transition: color var(--transition);
+}
+.page-daily-feed-link:hover {
+  color: var(--accent);
+}

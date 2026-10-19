@@ -68,6 +68,9 @@ export function BlockItem({
   const [unlockPassword, setUnlockPassword] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const showEncryptModalRef = useRef(false)
+  // Mirrors showDatePicker so the (deferred) blur handler sees the latest value
+  const showDatePickerRef = useRef(false)
+  showDatePickerRef.current = showDatePicker
   const autoLockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const AUTO_LOCK_MS = 5 * 60 * 1000
   // Pending cursor position: set before setEditing(true); consumed by useLayoutEffect
@@ -161,8 +164,27 @@ export function BlockItem({
   }, [editing])
 
   const handleContentChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const val = e.target.value
+    let val = e.target.value
     const cursor = e.target.selectionStart
+
+    // Roam-style auto-close for "[[" / "((" typed as plain input. The desktop
+    // keydown handler already pairs brackets, but iOS skips that path (see the
+    // keydown comment) and a "[" typed right before other text isn't paired
+    // there either — so close the double bracket here: "[[" → "[[|]]".
+    const ie = e.nativeEvent as InputEvent
+    const lastTyped = ie?.inputType === 'insertText' ? ie.data?.slice(-1) : undefined
+    if (lastTyped === '[' || lastTyped === '(') {
+      const open = lastTyped === '[' ? '[[' : '(('
+      const close = lastTyped === '[' ? ']]' : '))'
+      if (val.slice(0, cursor).endsWith(open) && !val.slice(cursor).startsWith(close)) {
+        val = val.slice(0, cursor) + close + val.slice(cursor)
+        const ta = e.target
+        ta.value = val
+        ta.setSelectionRange(cursor, cursor)
+        setTimeout(() => ta.setSelectionRange(cursor, cursor), 0)
+      }
+    }
+
     setContent(val)
     // Don't propagate plaintext to the store while the block is unlocked —
     // doing so would write it to disk and iCloud on every keystroke.
@@ -394,12 +416,17 @@ export function BlockItem({
           }, 0)
           return
         }
-        // Stray bracket before cursor — insert a single literal bracket, no menu.
+        // Previous bracket wasn't auto-closed (e.g. typed before a word) —
+        // still close the double form like Roam: `[[` → `[[|]]`, menu open.
         e.preventDefault()
-        const newVal = before + e.key + after
+        const newVal = before + e.key + doubleClose + after
         const newCursor = selStart + 1
         setContent(newVal); onChange(block.id, newVal)
-        setTimeout(() => ta.setSelectionRange(newCursor, newCursor), 0)
+        setTimeout(() => {
+          ta.setSelectionRange(newCursor, newCursor)
+          if (isSquare) { setWikilinkQuery(''); setShowWikilink(true) }
+          else { setBlockRefQuery(''); setShowBlockRef(true) }
+        }, 0)
         return
       }
 
@@ -832,6 +859,19 @@ export function BlockItem({
     setTimeout(() => { ta?.focus(); ta?.setSelectionRange(cursor + dateTitle.length + 4, cursor + dateTitle.length + 4) }, 0)
   }
 
+  const handleDatePickerClose = () => {
+    setShowDatePicker(false)
+    // The blur handler skips while the picker is open; if focus has already
+    // left the textarea (outside tap), finish editing now.
+    if (document.activeElement !== textareaRef.current) {
+      setTimeout(() => {
+        if (document.activeElement === textareaRef.current) return
+        if (isUnlocked && unlockPassword) reEncrypt(textareaRef.current?.value ?? content, unlockPassword)
+        else { setEditing(false); closeAllMenus() }
+      }, 0)
+    }
+  }
+
   const isTodo = block.checked !== null && block.checked !== undefined
   const hasChildren = block.children.length > 0
 
@@ -985,6 +1025,7 @@ export function BlockItem({
                 onCopy={handleCopy}
                 onBlur={() => setTimeout(() => {
                   if (showEncryptModalRef.current) return
+                  if (showDatePickerRef.current) return  // picker handles its own close
                   if (justUnlockedRef.current) return  // skip re-encrypt on blur right after Touch ID unlock
                   if (isUnlocked && unlockPassword) {
                     reEncrypt(textareaRef.current?.value ?? content, unlockPassword)
@@ -1044,7 +1085,7 @@ export function BlockItem({
       )}
 
       {showDatePicker && editing && (
-        <DatePickerInline anchorRef={textareaRef} onSelect={handleDateSelect} onClose={() => setShowDatePicker(false)} />
+        <DatePickerInline anchorRef={textareaRef} onSelect={handleDateSelect} onClose={handleDatePickerClose} />
       )}
 
       {!collapsed && hasChildren && (
@@ -1097,7 +1138,7 @@ function EncryptedBlockView({ blockId, content, onUnlock }: {
   const tryBiometric = useCallback(async () => {
     setMode('touchid')
     try {
-      const res = await platform.promptBiometric('Unlock encrypted block in Roma Notes')
+      const res = await platform.promptBiometric('Unlock encrypted block in Roma Research')
       if (res.success) {
         const key = await platform.getKey(blockId)
         if (key !== null) {

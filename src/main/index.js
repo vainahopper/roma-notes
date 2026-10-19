@@ -83,7 +83,7 @@ function createStartupBackup() {
 //   {
 //     "version": "1.4.0",
 //     "notes": "Bug fixes and improvements",
-//     "dmgPath": "/path/to/Roma Notes.dmg"
+//     "dmgPath": "/path/to/Roma Research.dmg"
 //   }
 //
 // Or set ROMA_UPDATE_URL env to a remote JSON endpoint.
@@ -154,7 +154,7 @@ function checkForUpdates(win, silent = false) {
           dialog.showMessageBox(win, {
             type: 'info',
             title: 'Update Available',
-            message: `Roma Notes ${info.version} is available`,
+            message: `Roma Research ${info.version} is available`,
             detail: info.notes
               ? `What's new:\n${info.notes}\n\nYou have version ${currentVersion}.`
               : `You have version ${currentVersion}.`,
@@ -170,7 +170,7 @@ function checkForUpdates(win, silent = false) {
           dialog.showMessageBox(win, {
             type: 'info',
             title: 'No Updates',
-            message: `Roma Notes ${currentVersion} is up to date.`,
+            message: `Roma Research ${currentVersion} is up to date.`,
             buttons: ['OK'],
           })
         }
@@ -203,7 +203,7 @@ function checkForUpdates(win, silent = false) {
     dialog.showMessageBox(win, {
       type: 'info',
       title: 'No Updates',
-      message: `Roma Notes ${currentVersion} is up to date.`,
+      message: `Roma Research ${currentVersion} is up to date.`,
       detail: 'No new version has been built yet.\n\nWhen you build a new version with "npm run dist", the update will be detected automatically here.',
       buttons: ['OK'],
     })
@@ -247,11 +247,18 @@ function applyUpdate(win, info) {
         const sourceApp = path.join(mountPoint, appName)
         const appIdx = process.execPath.indexOf('.app/')
         const runningApp = appIdx >= 0 ? process.execPath.slice(0, appIdx + 4) : null
-        const destApp = (runningApp && !runningApp.startsWith('/Volumes/'))
-          ? runningApp
-          : path.join('/Applications', appName)
+        // Install next to the running app, under the DMG's .app name. If the app
+        // was renamed (e.g. "Roma Notes.app" → "Roma Research.app"), the old
+        // bundle is removed so only one copy stays in /Applications.
+        const installDir = (runningApp && !runningApp.startsWith('/Volumes/'))
+          ? path.dirname(runningApp)
+          : '/Applications'
+        const destApp = path.join(installDir, appName)
 
         execSync(`rm -rf "${destApp}"`)
+        if (runningApp && runningApp !== destApp && !runningApp.startsWith('/Volumes/')) {
+          execSync(`rm -rf "${runningApp}"`)
+        }
 
         sendProgress('Installing…', 70)
         execSync(`ditto "${sourceApp}" "${destApp}"`)
@@ -270,7 +277,8 @@ function applyUpdate(win, info) {
         sendProgress('Done', 100)
 
         setTimeout(() => {
-          app.relaunch()
+          // Relaunch the freshly installed bundle (its path/executable name may differ)
+          app.relaunch({ execPath: path.join(destApp, 'Contents', 'MacOS', path.basename(appName, '.app')) })
           app.exit(0)
         }, 800)
       } catch (err) {
@@ -455,13 +463,19 @@ function createWindow() {
   // Set up native menu
   const template = [
     {
-      label: 'Roma Notes',
+      label: 'Roma Research',
       submenu: [
-        { role: 'about', label: 'About Roma Notes' },
+        { role: 'about', label: 'About Roma Research' },
         { type: 'separator' },
         {
           label: 'Check for Updates…',
           click: () => checkForUpdates(win, false),
+        },
+        { type: 'separator' },
+        {
+          label: 'Settings…',
+          accelerator: 'CmdOrCtrl+,',
+          click: () => win.webContents.send('menu:settings'),
         },
         { type: 'separator' },
         { role: 'services' },
@@ -559,6 +573,7 @@ ipcMain.on('update:install', () => {
 })
 
 app.whenReady().then(() => {
+  app.setAboutPanelOptions({ applicationName: 'Roma Research', applicationVersion: app.getVersion() })
   ensureDirectories()
   createStartupBackup()
   createWindow()
@@ -757,7 +772,7 @@ ipcMain.handle('auth:promptTouchId', (_, reason) => {
   return new Promise((resolve) => {
     const bin = getTouchIdBinaryPath()
     if (!fs.existsSync(bin)) { resolve({ success: false, error: 'binary not found' }); return }
-    const msg = reason || 'Unlock encrypted block in Roma Notes'
+    const msg = reason || 'Unlock encrypted block in Roma Research'
     execFile(bin, [msg], { timeout: 30000 }, (err, stdout) => {
       const out = stdout.trim()
       if (out === 'success') {
