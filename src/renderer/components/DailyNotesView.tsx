@@ -87,10 +87,11 @@ export function DailyNotesView({ allPages, pagesVersion, onNavigate, onOpenSideb
 
     const targetDate = scrollToDate === todayId ? today : parseDatePage(scrollToDate)
     if (targetDate) {
-      const offset = differenceInCalendarDays(today, targetDate)
+      // Never extend the feed into the future: today stays at the top
+      const offset = Math.max(0, differenceInCalendarDays(today, targetDate))
       if (offset < newestRef.current || offset > oldestRef.current) {
         // Open the window a few days above the target so there's room to scroll up
-        setNewestDayOffset(offset <= DAYS_TO_LOAD ? Math.min(0, offset) : offset - 3)
+        setNewestDayOffset(offset <= DAYS_TO_LOAD ? 0 : offset - 3)
         setOldestDayOffset(prev => Math.max(prev, offset + DAYS_TO_LOAD))
         // Don't let the jump itself trigger top/bottom loading
         loadingMoreRef.current = true

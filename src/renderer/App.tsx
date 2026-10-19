@@ -10,7 +10,7 @@ import { TitleBar } from './components/TitleBar'
 import { MobileBottomBar } from './components/MobileBottomBar'
 import { MobileKeyboardToolbar } from './components/MobileKeyboardToolbar'
 import { loadAllPages, retryLoad, useStore, createNewPage, getOrCreateDailyPage, savePage, deletePage, mergeSyncedPages, forceReloadPages } from './stores/useStore'
-import { todayPageId, todayPageTitle } from './utils/helpers'
+import { todayPageId, todayPageTitle, parseDatePage } from './utils/helpers'
 import { buildSearchIndex } from './utils/search'
 import type { Block, ZoomFrame } from '../shared/types'
 import { platform } from './platform'
@@ -226,16 +226,6 @@ export default function App() {
   const handleChangeStyle = useCallback((next: UiStyle) => {
     setUiStyle(next)
     platform.getSettings().then((s: any) => platform.saveSettings({ ...s, uiStyle: next }))
-  }, [])
-
-  const handleToggleTheme = useCallback(() => {
-    setThemeMode(prev => {
-      const next: ThemeMode = prev === 'dark' ? 'light' : prev === 'light' ? 'system' : 'dark'
-      platform.getSettings().then((s: any) => {
-        platform.saveSettings({ ...s, theme: next })
-      })
-      return next
-    })
   }, [])
 
   useEffect(() => {
@@ -495,9 +485,12 @@ export default function App() {
     }
 
     const isDaily = page?.isDaily || (pageTitle && isDateLike(pageTitle))
+    // The feed runs from today backwards — a future day always opens as its own page
+    const dayDate = isDaily ? parseDatePage(actualPageId) ?? (pageTitle ? parseDatePage(pageTitle) : null) : null
+    const isFuture = !!dayDate && dayDate.getTime() > new Date().setHours(23, 59, 59, 999)
 
     if (isDaily) {
-      if (openStandalone) {
+      if (openStandalone || isFuture) {
         if (pageTitle) getOrCreateDailyPage(pageId, pageTitle)
         pushHistory(pageId, zoom)
         setMainView(pageId)
@@ -614,7 +607,6 @@ export default function App() {
   const activePage = activePageId ? store.pages.get(activePageId) : null
   const sidebarPage = sidebarPageId ? store.pages.get(sidebarPageId) : null
   const isDailyView = mainView === 'daily'
-  const effectiveTheme = getEffectiveTheme(themeMode)
 
   if (store.loadError) {
     return (
@@ -637,9 +629,7 @@ export default function App() {
   return (
     <div className="app-root">
       <TitleBar
-        theme={effectiveTheme}
-        themeMode={themeMode}
-        onToggleTheme={handleToggleTheme}
+        onCalendar={() => setShowCalendar(true)}
         onToggleSidebar={() => setSidebarOpen(o => {
           const next = !o
           if (window.innerWidth > 768) {

@@ -78,6 +78,9 @@ export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDele
 
 
   const isDaily = page.isDaily || isDatePage(page.title)
+  // Future days aren't part of the Daily Notes feed (it starts at today)
+  const dayDate = isDaily ? parseDatePage(page.id) ?? parseDatePage(page.title) : null
+  const isFutureDay = !!dayDate && dayDate.getTime() > new Date().setHours(23, 59, 59, 999)
   const isTodoPage = TODO_PAGE_TITLES.includes(page.title.toLowerCase())
   const isDonePage = DONE_PAGE_TITLES.includes(page.title.toLowerCase())
 
@@ -349,7 +352,7 @@ export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDele
             </>
           )}
         </div>
-        {isDaily && !isSidebar && onShowInDailyNotes && (
+        {isDaily && !isSidebar && onShowInDailyNotes && !isFutureDay && (
           <button
             className="page-daily-feed-link"
             onClick={() => onShowInDailyNotes(page.id)}

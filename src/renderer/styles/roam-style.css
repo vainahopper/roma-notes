@@ -95,20 +95,32 @@
   --roam-sb-border: rgba(255, 255, 255, 0.05);
 }
 
-/* ─── Title bar ─────────────────────────────────────────────── */
-[data-style="roam"] .titlebar {
-  height: 46px;
-  background: var(--bg-primary);
-  border-bottom: 1px solid var(--border-subtle);
-}
-[data-style="roam"] .titlebar-btn {
-  width: 28px;
-  height: 28px;
-  color: var(--text-tertiary);
-}
-[data-style="roam"] .titlebar-btn.active {
-  background: var(--bg-active);
-  color: var(--text-primary);
+/* ─── Title bar (Mac): always dark, like Roam ──────────────────
+   Desktop only — mobile.css owns the fixed, safe-area-aware iPhone bar. */
+@media (min-width: 769px) {
+  [data-style="roam"] .titlebar {
+    height: 46px;
+    background: var(--roam-sb-bg);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.25);
+  }
+  [data-style="roam"] .titlebar .app-name { color: var(--roam-sb-text); opacity: 0.85; }
+  [data-style="roam"] .titlebar-btn {
+    width: 28px;
+    height: 28px;
+    color: var(--roam-sb-text);
+  }
+  [data-style="roam"] .titlebar-btn:hover {
+    background: var(--roam-sb-hover);
+    color: var(--roam-sb-text-strong);
+  }
+  [data-style="roam"] .titlebar-btn.active {
+    background: var(--roam-sb-active);
+    color: var(--roam-sb-text-strong);
+  }
+  [data-style="roam"] .titlebar-btn:disabled:hover {
+    background: none;
+    color: var(--roam-sb-text);
+  }
 }
 
 /* ─── Left sidebar: dark slate column ──────────────────────── */
@@ -179,22 +191,22 @@
   color: var(--text-primary);
 }
 
-/* ─── Page + daily notes ───────────────────────────────────── */
-[data-style="roam"] .page-content { padding: 28px 64px 48px; max-width: 900px; }
+/* ─── Page + daily notes ─────────────────────────────────────
+   Sizes/padding are desktop only; mobile.css keeps the phone layout. */
+@media (min-width: 769px) {
+  [data-style="roam"] .page-content { padding: 28px 64px 48px; max-width: 900px; }
+  [data-style="roam"] .page-title { font-size: 36px; }
+  [data-style="roam"] .is-sidebar .page-title { font-size: 22px; }
+  [data-style="roam"] .day-entry { padding: 36px 0 32px; }
+  [data-style="roam"] .day-fulldate { font-size: 32px; }
+}
 [data-style="roam"] .page-title {
-  font-size: 36px;
   font-weight: 700;
   letter-spacing: -0.015em;
   line-height: 1.2;
 }
-[data-style="roam"] .is-sidebar .page-title { font-size: 22px; }
-
-[data-style="roam"] .day-entry {
-  padding: 36px 0 32px;
-  border-bottom: 1px solid var(--border-subtle);
-}
+[data-style="roam"] .day-entry { border-bottom: 1px solid var(--border-subtle); }
 [data-style="roam"] .day-fulldate {
-  font-size: 32px;
   font-weight: 700;
   letter-spacing: -0.015em;
 }
