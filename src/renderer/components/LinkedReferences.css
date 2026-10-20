@@ -278,6 +278,20 @@
 }
 
 /* Bullet navigation — pointer cursor on hover */
+/* Wrapper so the dates tooltip can anchor to the dot without scaling with it */
+.backlink-bullet-hover {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.backlink-bullet-hover .block-bullet-tooltip {
+  left: 18px;
+}
+.backlink-bullet-hover:hover .block-bullet-tooltip {
+  display: flex;
+}
+
 .backlink-bullet-nav {
   cursor: pointer;
   transition: background var(--transition), transform var(--transition);

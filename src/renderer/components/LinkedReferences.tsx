@@ -192,6 +192,17 @@ function BacklinkMatch({
 const TODO_RE = /\{\{\[\[TODO\]\]\}\}/i
 const DONE_RE = /\{\{\[\[DONE\]\]\}\}/i
 
+/** Hover tooltip with created/edited dates — mirrors BlockItem's bullet tooltip */
+function BulletDates({ block }: { block: Block }) {
+  if (!block.createdAt && !block.updatedAt) return null
+  return (
+    <span className="block-bullet-tooltip">
+      {block.createdAt && <span>Created: {new Date(block.createdAt).toLocaleString()}</span>}
+      {block.updatedAt && block.updatedAt !== block.createdAt && <span>Edited: {new Date(block.updatedAt).toLocaleString()}</span>}
+    </span>
+  )
+}
+
 function BacklinkBlock({
   block, page, allPages, onNavigate, onNavigateToBlock, onToggleBlock, onToggleTodoMarker, onSaveRefSubtree, initiallyExpanded,
 }: {
@@ -261,11 +272,14 @@ function BacklinkBlock({
         <div className={`backlink-bullet-area${isTodo ? ' todo-bullet-area' : ''}`}>
           {isTodo ? (
             <>
-              <span
-                className="backlink-bullet-dot backlink-todo-side-bullet backlink-bullet-nav"
-                onClick={handleBulletClick}
-                title="Go to block"
-              />
+              <span className="backlink-bullet-hover">
+                <span
+                  className="backlink-bullet-dot backlink-todo-side-bullet backlink-bullet-nav"
+                  onClick={handleBulletClick}
+                  title="Go to block"
+                />
+                <BulletDates block={block} />
+              </span>
               <button
                 className={`backlink-checkbox${effectiveChecked ? ' checked' : ''}`}
                 onClick={e => { e.stopPropagation(); onToggleBlock?.(page.id, block.id) }}
@@ -284,11 +298,14 @@ function BacklinkBlock({
               </button>
             </>
           ) : (
-            <span
-              className="backlink-bullet-dot backlink-bullet-nav"
-              onClick={handleBulletClick}
-              title="Go to block"
-            />
+            <span className="backlink-bullet-hover">
+              <span
+                className="backlink-bullet-dot backlink-bullet-nav"
+                onClick={handleBulletClick}
+                title="Go to block"
+              />
+              <BulletDates block={block} />
+            </span>
           )}
         </div>
 
