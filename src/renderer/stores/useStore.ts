@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import type { Page, Block } from '../../shared/types'
 import { generateId, todayPageId, todayPageTitle } from '../utils/helpers'
 import { platform } from '../platform'
+import { queueCloudPush, queueCloudDelete, cloudCatchUp, fetchCloudInbox, ackCloudInbox, cloudEnabled } from '../utils/cloudBridge'
 
 // Global store using a simple event emitter pattern
 type Listener = () => void
@@ -91,6 +92,7 @@ export async function savePage(page: Page) {
   notify()
   // Persist
   await platform.savePage(page)
+  queueCloudPush(page)
 }
 
 export async function deletePage(id: string) {
@@ -98,6 +100,7 @@ export async function deletePage(id: string) {
   storeState = { ...storeState, pagesVersion: storeState.pagesVersion + 1 }
   notify()
   await platform.deletePage(id)
+  queueCloudDelete(id)
 }
 
 export function createNewPage(title: string, id?: string): Page {
@@ -123,7 +126,48 @@ export function importPages(pages: Page[]) {
   storeState = { ...storeState, pagesVersion: storeState.pagesVersion + 1 }
   notify()
   // Save all
-  pages.forEach(p => platform.savePage(p))
+  pages.forEach(p => {
+    platform.savePage(p)
+    queueCloudPush(p)
+  })
+}
+
+// ─── Cloud bridge (agent access, see utils/cloudBridge.ts) ──────────────────
+
+let cloudBusy = false
+
+/** Merge blocks the agent added through the cloud API into local pages. */
+async function applyCloudInbox() {
+  const items = await fetchCloudInbox()
+  if (!items.length) return
+  const touched = new Map<string, Page>()
+  for (const item of items) {
+    const existing = touched.get(item.pageId) ?? storeState.pages.get(item.pageId)
+    const page: Page = existing
+      ? { ...existing, blocks: [...existing.blocks] }
+      : { id: item.pageId, title: item.pageTitle, blocks: [], createdAt: item.createdAt, updatedAt: item.createdAt, isDaily: item.isDaily || undefined }
+    const hasBlock = (bs: Block[]): boolean => bs.some(b => b.id === item.block.id || hasBlock(b.children))
+    if (hasBlock(page.blocks)) continue
+    // Drop a lone empty placeholder bullet so the new block isn't preceded by a blank one.
+    if (page.blocks.length === 1 && !page.blocks[0].content.trim() && !page.blocks[0].children.length) page.blocks = []
+    page.blocks.push(item.block)
+    touched.set(page.id, page)
+  }
+  for (const page of touched.values()) await savePage(page)
+  await ackCloudInbox(items.map(i => i.id))
+}
+
+export async function runCloudSync() {
+  if (!cloudEnabled || !storeState.loaded || cloudBusy) return
+  cloudBusy = true
+  try {
+    await applyCloudInbox()
+    await cloudCatchUp([...storeState.pages.values()])
+  } catch (err) {
+    console.warn('[Roma] cloud sync failed:', err)
+  } finally {
+    cloudBusy = false
+  }
 }
 
 /**

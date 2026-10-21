@@ -9,6 +9,7 @@ export default defineConfig({
   plugins: [react()],
   base: './',
   root: 'src/renderer',
+  envDir: __dirname,
   define: {
     __APP_VERSION__: JSON.stringify(version),
   },

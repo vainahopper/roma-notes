@@ -12,7 +12,7 @@ import { ALL_PAGES_VIEW, GRAPH_VIEW, isSpecialView } from './utils/views'
 import { TitleBar } from './components/TitleBar'
 import { MobileBottomBar } from './components/MobileBottomBar'
 import { MobileKeyboardToolbar } from './components/MobileKeyboardToolbar'
-import { loadAllPages, retryLoad, useStore, createNewPage, getOrCreateDailyPage, savePage, deletePage, mergeSyncedPages, forceReloadPages } from './stores/useStore'
+import { loadAllPages, retryLoad, useStore, createNewPage, getOrCreateDailyPage, savePage, deletePage, mergeSyncedPages, forceReloadPages, runCloudSync } from './stores/useStore'
 import { todayPageId, todayPageTitle, parseDatePage } from './utils/helpers'
 import { buildSearchIndex } from './utils/search'
 import type { Block, ZoomFrame } from '../shared/types'
@@ -268,18 +268,22 @@ export default function App() {
       }
 
       // Startup pull: silent unless something actually changed or failed
-      platform.syncPull().then(result => {
+      platform.syncPull().then(async result => {
         if (result.merged > 0) {
-          forceReloadPages()
+          await forceReloadPages()
           setSyncStatus(`iCloud: ${result.merged} updated`)
           clearAfter(3000)
         } else {
           setSyncStatus(null)
         }
+        // Cloud bridge only after iCloud is merged, so agent writes land on fresh pages
+        runCloudSync()
       }).catch(() => {
         setSyncStatus('iCloud: unavailable')
         clearAfter(3000)
       })
+      // The main process keeps iCloud current via fs.watch, so a plain interval is safe here
+      const cloudTimer = setInterval(runCloudSync, 60_000)
 
       // Ongoing: file watcher in main process sends this when iPhone changes arrive
       platform.onSyncUpdated(() => {
@@ -290,6 +294,7 @@ export default function App() {
 
       return () => {
         platform.removeSyncListeners()
+        clearInterval(cloudTimer)
         if (clearTimer) clearTimeout(clearTimer)
       }
     }
@@ -352,6 +357,9 @@ export default function App() {
             totalSynced += result.merged
           }
           pendingPlaceholders = result.placeholders ?? 0
+          // Cloud bridge only once iCloud is fully merged, so agent writes never
+          // land on a stale page that would then win iCloud conflict resolution
+          if (!result.error && pendingPlaceholders === 0) await runCloudSync()
           if (result.error) {
             setSyncStatus(`iCloud: ${result.error}`)
           } else if (pendingPlaceholders > 0) {

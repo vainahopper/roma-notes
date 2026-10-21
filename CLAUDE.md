@@ -82,7 +82,7 @@ manually via **Roma Notes > Check for Updates…**.
 `npm run deploy:ios` copies `dist/` to the iCloud container. The iPhone app
 detects the new version 5 seconds after launch and applies it (reloads).
 
-## Current version: 1.8.20
+## Current version: 1.8.21
 
 ## iPhone setup (one-time)
 1. In Xcode: select your Apple Developer Team (Signing & Capabilities)
@@ -116,6 +116,12 @@ detects the new version 5 seconds after launch and applies it (reloads).
 - iPhone reads/writes the same iCloud container via `RomaCloudSyncPlugin`
 - Both sides pull on startup, every 60s, and on app focus/resume
 - Conflict resolution: latest `updatedAt` timestamp wins
+
+## Cloud bridge (agent access — Instinct)
+- `cloud/` = Netlify site `roma-research-14a959` (function `notes.mts` + Netlify Blobs). Deploy: `cd cloud && netlify deploy --prod --no-build --dir public --functions netlify/functions`
+- Agent routes `/n/<ROMA_TOKEN>/{today,page,search,recent,add}` need Basic auth `instinct:<ROMA_AGENT_PASSWORD>`; app routes `/n/<ROMA_TOKEN>/sync/*` use the path token only
+- Apps (`src/renderer/utils/cloudBridge.ts`) push pages on save, catch up against `/sync/index`, and merge the agent's inbox into local pages after iCloud pull
+- Build needs `VITE_ROMA_CLOUD_URL` in `.env.local` (gitignored); token/password copies in `cloud/.netlify/`
 
 ## Roam-compatible syntax
 `[[wikilinks]]`, `#tags`, `#[[multi word]]`, `{{[[TODO]]}}` / `{{[[DONE]]}}`, `**bold**`, `__italic__`, `^^highlight^^`, `` `code` ``, `Key:: value`, `{{encrypt:BASE64}}`

@@ -9,3 +9,8 @@ ios/App/App/public/
 *.dmg
 
 .superpowers/
+
+# Local Netlify folder
+.netlify
+
+.env.local
