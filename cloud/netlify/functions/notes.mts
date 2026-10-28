@@ -154,13 +154,14 @@ function hasRealContent(blocks: Block[]): boolean {
   return blocks.some(b => b.content.trim() !== '' || hasRealContent(b.children))
 }
 
-async function savePages(incoming: Page[]): Promise<void> {
+async function savePages(incoming: Page[], { fromApp = false } = {}): Promise<void> {
   const s = store()
   const pages: Page[] = []
   for (const p of incoming) {
-    // Content beats emptiness regardless of timestamp (same rule as iCloud sync):
-    // a device that saves a not-yet-synced empty daily must not wipe the real one.
-    if (!hasRealContent(p.blocks)) {
+    // A device that saves a not-yet-synced empty daily note must not wipe the
+    // real one (same content-wins rule as iCloud sync). Only for app uploads of
+    // dailies: emptying a topic page — or an agent delete — is intentional.
+    if (fromApp && p.isDaily && !hasRealContent(p.blocks)) {
       const existing = await getPage(p.id)
       if (existing && hasRealContent(existing.blocks)) continue
     }
@@ -384,7 +385,7 @@ async function routeSync(req: Request, sub: string): Promise<Response> {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS })
   if (sub === 'pages' && req.method === 'POST') {
     const pages = (await req.json()) as Page[]
-    await savePages(pages)
+    await savePages(pages, { fromApp: true })
     return json({ ok: true, saved: pages.length })
   }
   if (sub === 'index' && req.method === 'GET') {
