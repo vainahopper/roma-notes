@@ -41,6 +41,24 @@ interface InboxItem {
   createdAt: string
 }
 
+// Agent edits/deletes waiting for the apps. Kept apart from the "inbox" (adds)
+// so app builds that only understand adds keep working.
+interface CloudOp {
+  id: string
+  type: 'edit' | 'delete'
+  pageId: string
+  blockId: string
+  content?: string
+  createdAt: string
+}
+
+interface TrashItem {
+  pageId: string
+  pageTitle: string
+  block: Block
+  deletedAt: string
+}
+
 const TZ = 'Europe/Madrid'
 const ENCRYPT_PATTERN = /\{\{encrypt:[^}]+\}\}/
 
@@ -84,15 +102,26 @@ function parseDaily(s: string): { y: number; m: number; d: number } | null {
   return null
 }
 
-function blocksToMarkdown(blocks: Block[], indent = 0): string {
+function blocksToMarkdown(blocks: Block[], indent = 0, withIds = false): string {
   const lines: string[] = []
   for (const b of blocks) {
     if (!b.content.trim() && b.children.length === 0) continue
     const content = ENCRYPT_PATTERN.test(b.content) ? '[encrypted]' : b.content
-    lines.push(`${'  '.repeat(indent)}- ${content}`)
-    if (b.children.length) lines.push(blocksToMarkdown(b.children, indent + 1))
+    // "^id" suffix lets the agent target a block with /edit or /delete
+    lines.push(`${'  '.repeat(indent)}- ${content}${withIds ? `  ^${b.id}` : ''}`)
+    if (b.children.length) lines.push(blocksToMarkdown(b.children, indent + 1, withIds))
   }
   return lines.filter(Boolean).join('\n')
+}
+
+/** Locate a block anywhere in a tree: the array holding it and its index there. */
+function findBlock(blocks: Block[], id: string): { list: Block[]; index: number } | null {
+  for (let i = 0; i < blocks.length; i++) {
+    if (blocks[i].id === id) return { list: blocks, index: i }
+    const inner = findBlock(blocks[i].children, id)
+    if (inner) return inner
+  }
+  return null
 }
 
 function plainText(blocks: Block[]): string {
@@ -121,8 +150,22 @@ async function getPage(id: string): Promise<Page | null> {
   return (await store().get(`pages/${sanitizeFilename(id)}`, { type: 'json' })) as Page | null
 }
 
-async function savePages(pages: Page[]): Promise<void> {
+function hasRealContent(blocks: Block[]): boolean {
+  return blocks.some(b => b.content.trim() !== '' || hasRealContent(b.children))
+}
+
+async function savePages(incoming: Page[]): Promise<void> {
   const s = store()
+  const pages: Page[] = []
+  for (const p of incoming) {
+    // Content beats emptiness regardless of timestamp (same rule as iCloud sync):
+    // a device that saves a not-yet-synced empty daily must not wipe the real one.
+    if (!hasRealContent(p.blocks)) {
+      const existing = await getPage(p.id)
+      if (existing && hasRealContent(existing.blocks)) continue
+    }
+    pages.push(p)
+  }
   for (const p of pages) await s.setJSON(`pages/${sanitizeFilename(p.id)}`, p)
   const index = await getIndex()
   const byId = new Map(index.map(e => [e.id, e]))
@@ -162,6 +205,12 @@ WRITE (GET requests; URL-encode the text)
   ${base}/add?text=<text>&todo=1                add it as a TODO
   ${base}/add?text=<text>&page=<title>          add to another page (created if missing)
 
+EDIT / DELETE (block ids are the "^id" at the end of each line in /today and /page)
+  ${base}/edit?page=<title>&id=<blockId>&text=<new text>   replace a block's text
+  ${base}/delete?page=<title>&id=<blockId>                 delete a block (and its sub-bullets)
+  ${base}/delete?page=<title>&id=<id1>,<id2>,...           delete several blocks
+  Encrypted blocks can't be edited or deleted. Deleted blocks are kept in a server-side trash.
+
 Writes reach the Mac/iPhone apps the next time they open.
 `
 }
@@ -170,7 +219,7 @@ async function routeToday(): Promise<Response> {
   const parts = todayParts()
   const page = await getPage(dailyId(parts))
   if (!page) return text(`# ${dailyTitle(parts)}\n\n(empty)`)
-  return text(`# ${page.title}\n\n${blocksToMarkdown(page.blocks) || '(empty)'}`)
+  return text(`# ${page.title}\n\n${blocksToMarkdown(page.blocks, 0, true) || '(empty)'}`)
 }
 
 async function routePage(url: URL): Promise<Response> {
@@ -185,7 +234,7 @@ async function routePage(url: URL): Promise<Response> {
     .slice(0, 20)
     .map(e => `## ${e.title}\n${e.text.split('\n').filter(l => l.toLowerCase().includes(link)).map(l => `- ${l}`).join('\n')}`)
   const refsSection = refs.length ? `\n\n---\nLinked references:\n\n${refs.join('\n\n')}` : ''
-  return text(`# ${page.title}\nupdated ${page.updatedAt}\n\n${blocksToMarkdown(page.blocks) || '(empty)'}${refsSection}`)
+  return text(`# ${page.title}\nupdated ${page.updatedAt}\n\n${blocksToMarkdown(page.blocks, 0, true) || '(empty)'}${refsSection}`)
 }
 
 async function routeSearch(url: URL): Promise<Response> {
@@ -257,6 +306,69 @@ async function routeAdd(url: URL): Promise<Response> {
   return text(`Added to "${page.title}": ${content}`)
 }
 
+async function pushOps(ops: CloudOp[]): Promise<void> {
+  const s = store()
+  const queue = ((await s.get('ops', { type: 'json' })) as CloudOp[] | null) ?? []
+  await s.setJSON('ops', [...queue, ...ops])
+}
+
+async function routeEdit(url: URL): Promise<Response> {
+  const title = url.searchParams.get('page')?.trim()
+  const blockId = url.searchParams.get('id')?.trim()
+  const raw = url.searchParams.get('text')
+  if (!title || !blockId || raw === null) return text('Usage: /edit?page=<title>&id=<blockId>&text=<new text>', 400)
+  const content = raw.trim()
+  if (!content) return text('Empty text — use /delete to remove a block.', 400)
+  const page = await findPage(title)
+  // Outcomes are reported as 200 + message: agents read the text, and some
+  // platforms swap 4xx bodies for their own error pages.
+  if (!page) return text(`Page "${title}" not found — nothing edited.`)
+  const hit = findBlock(page.blocks, blockId)
+  if (!hit) return text(`Block ^${blockId} not found on "${page.title}" — nothing edited. Reload the page to get current ids.`)
+  const block = hit.list[hit.index]
+  if (ENCRYPT_PATTERN.test(block.content)) return text('That block is encrypted and can\'t be edited.')
+  if (block.content === content) return text(`Unchanged: ${content}`)
+
+  const now = new Date().toISOString()
+  block.content = content
+  block.updatedAt = now
+  page.updatedAt = now
+  await savePages([page])
+  await pushOps([{ id: generateId(), type: 'edit', pageId: page.id, blockId, content, createdAt: now }])
+  return text(`Edited on "${page.title}": ${content}`)
+}
+
+async function routeDelete(url: URL): Promise<Response> {
+  const title = url.searchParams.get('page')?.trim()
+  const ids = (url.searchParams.get('id') ?? '').split(',').map(s => s.trim()).filter(Boolean)
+  if (!title || !ids.length) return text('Usage: /delete?page=<title>&id=<blockId>[,<blockId>...]', 400)
+  const page = await findPage(title)
+  if (!page) return text(`Page "${title}" not found — nothing deleted.`)
+
+  const now = new Date().toISOString()
+  const deleted: Block[] = []
+  const report: string[] = []
+  for (const id of ids) {
+    const hit = findBlock(page.blocks, id)
+    if (!hit) { report.push(`^${id}: not found (already deleted?)`); continue }
+    const block = hit.list[hit.index]
+    const hasEncrypted = (b: Block): boolean => ENCRYPT_PATTERN.test(b.content) || b.children.some(hasEncrypted)
+    if (hasEncrypted(block)) { report.push(`^${id}: contains encrypted content, not deleted`); continue }
+    hit.list.splice(hit.index, 1)
+    deleted.push(block)
+    report.push(`^${id}: deleted — ${block.content.slice(0, 80)}`)
+  }
+  if (!deleted.length) return text(`Nothing deleted on "${page.title}":\n${report.join('\n')}`)
+
+  page.updatedAt = now
+  await savePages([page])
+  const s = store()
+  const trash = ((await s.get('trash', { type: 'json' })) as TrashItem[] | null) ?? []
+  await s.setJSON('trash', [...trash, ...deleted.map(block => ({ pageId: page.id, pageTitle: page.title, block, deletedAt: now }))].slice(-500))
+  await pushOps(deleted.map(b => ({ id: generateId(), type: 'delete' as const, pageId: page.id, blockId: b.id, createdAt: now })))
+  return text(`On "${page.title}":\n${report.join('\n')}`)
+}
+
 // App-side sync, called by the Mac/iPhone apps (src/renderer/utils/cloudBridge.ts).
 const CORS = {
   'access-control-allow-origin': '*',
@@ -287,6 +399,16 @@ async function routeSync(req: Request, sub: string): Promise<Response> {
   }
   if (sub === 'inbox' && req.method === 'GET') {
     return json(((await store().get('inbox', { type: 'json' })) as InboxItem[] | null) ?? [])
+  }
+  if (sub === 'ops' && req.method === 'GET') {
+    return json(((await store().get('ops', { type: 'json' })) as CloudOp[] | null) ?? [])
+  }
+  if (sub === 'ops/ack' && req.method === 'POST') {
+    const { ids } = (await req.json()) as { ids: string[] }
+    const s = store()
+    const ops = ((await s.get('ops', { type: 'json' })) as CloudOp[] | null) ?? []
+    await s.setJSON('ops', ops.filter(o => !ids.includes(o.id)))
+    return json({ ok: true })
   }
   if (sub === 'inbox/ack' && req.method === 'POST') {
     const { ids } = (await req.json()) as { ids: string[] }
@@ -334,6 +456,8 @@ export default async (req: Request, _context: Context): Promise<Response> => {
       case 'search': return await routeSearch(url)
       case 'recent': return await routeRecent(url)
       case 'add': return await routeAdd(url)
+      case 'edit': return await routeEdit(url)
+      case 'delete': return await routeDelete(url)
     }
     return text(`Unknown route. See ${base}/`, 404)
   } catch (err) {

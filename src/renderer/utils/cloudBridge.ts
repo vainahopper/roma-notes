@@ -17,6 +17,16 @@ export interface InboxItem {
   createdAt: string
 }
 
+/** An agent edit/delete to replay on the local page (adds come via the inbox). */
+export interface CloudOp {
+  id: string
+  type: 'edit' | 'delete'
+  pageId: string
+  blockId: string
+  content?: string
+  createdAt: string
+}
+
 export const cloudEnabled = !!BASE
 
 const pending = new Map<string, Page>()
@@ -103,4 +113,16 @@ export async function fetchCloudInbox(): Promise<InboxItem[]> {
 export async function ackCloudInbox(ids: string[]): Promise<void> {
   if (!BASE || !ids.length) return
   await post('inbox/ack', { ids })
+}
+
+export async function fetchCloudOps(): Promise<CloudOp[]> {
+  if (!BASE) return []
+  const res = await fetch(`${BASE}/sync/ops`)
+  if (!res.ok) throw new Error(`cloud ops: ${res.status}`)
+  return res.json()
+}
+
+export async function ackCloudOps(ids: string[]): Promise<void> {
+  if (!BASE || !ids.length) return
+  await post('ops/ack', { ids })
 }
