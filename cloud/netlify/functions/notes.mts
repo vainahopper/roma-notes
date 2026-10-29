@@ -45,10 +45,19 @@ interface InboxItem {
 // so app builds that only understand adds keep working.
 interface CloudOp {
   id: string
-  type: 'edit' | 'delete'
+  type: 'edit' | 'delete' | 'move'
   pageId: string
   blockId: string
   content?: string
+  // move: destination. parentId null = top level; afterId null = first position.
+  // A cross-page move carries the block and the target page so a device that
+  // lacks either can still apply it.
+  toPageId?: string
+  toPageTitle?: string
+  toIsDaily?: boolean
+  parentId?: string | null
+  afterId?: string | null
+  block?: Block
   createdAt: string
 }
 
@@ -122,6 +131,48 @@ function findBlock(blocks: Block[], id: string): { list: Block[]; index: number 
     if (inner) return inner
   }
   return null
+}
+
+/** Parent block of `id` (null when top-level), or undefined when not found. */
+function findParent(blocks: Block[], id: string, parent: Block | null = null): Block | null | undefined {
+  for (const b of blocks) {
+    if (b.id === id) return parent
+    const inner = findParent(b.children, id, b)
+    if (inner !== undefined) return inner
+  }
+  return undefined
+}
+
+function containsBlock(block: Block, id: string): boolean {
+  return block.id === id || block.children.some(c => containsBlock(c, id))
+}
+
+/**
+ * Move a block (with its children) under `parentId` (null = top level), right
+ * after sibling `afterId` (null = first, 'last' = end). Mutates both pages.
+ * Returns an error message, or the resolved afterId on success.
+ */
+function moveBlock(
+  src: Page, blockId: string, dest: Page, parentId: string | null, afterId: string | null | 'last',
+): { error: string } | { afterId: string | null } {
+  const hit = findBlock(src.blocks, blockId)
+  if (!hit) return { error: `Block ^${blockId} not found on "${src.title}"` }
+  const block = hit.list[hit.index]
+  if (parentId && containsBlock(block, parentId)) return { error: `Can't move ^${blockId} inside itself` }
+  let target = dest.blocks
+  if (parentId) {
+    const p = findBlock(dest.blocks, parentId)
+    if (!p) return { error: `Parent ^${parentId} not found on "${dest.title}"` }
+    target = p.list[p.index].children
+  }
+  if (afterId === blockId) return { error: `Can't place ^${blockId} after itself` }
+  if (afterId && afterId !== 'last' && !target.some(b => b.id === afterId)) {
+    return { error: `^${afterId} is not a sibling at the destination` }
+  }
+  hit.list.splice(hit.index, 1)
+  const index = afterId === 'last' ? target.length : afterId ? target.findIndex(b => b.id === afterId) + 1 : 0
+  target.splice(index, 0, block)
+  return { afterId: index > 0 ? target[index - 1].id : null }
 }
 
 function plainText(blocks: Block[]): string {
@@ -212,6 +263,16 @@ EDIT / DELETE (block ids are the "^id" at the end of each line in /today and /pa
   ${base}/delete?page=<title>&id=<id1>,<id2>,...           delete several blocks
   Encrypted blocks can't be edited or deleted. Deleted blocks are kept in a server-side trash.
 
+STRUCTURE (sub-bullets always move with their block; several ids keep their order)
+  ${base}/indent?page=<title>&id=<blockId>                 indent (child of the bullet above)
+  ${base}/outdent?page=<title>&id=<blockId>                outdent (sibling right after its parent)
+  ${base}/move?page=<title>&id=<blockId>&under=<parentId>  make it the last child of another block
+  ${base}/move?page=<title>&id=<blockId>&after=<blockId>   place it right after another block
+  ${base}/move?page=<title>&id=<blockId>&after=first       first bullet at its level (add &under=top for top level)
+  ${base}/move?page=<title>&id=<blockId>&to=<other page>   move to another page (end; combine with under/after)
+  ${base}/add?text=<text>&page=<title>&under=<id>          add as a sub-bullet (or &after=<id> to add below a block)
+  /add replies with the new block's ^id.
+
 Writes reach the Mac/iPhone apps the next time they open.
 `
 }
@@ -267,44 +328,180 @@ async function routeAdd(url: URL): Promise<Response> {
   const todo = ['1', 'true', 'yes'].includes(url.searchParams.get('todo') ?? '')
   const content = todo ? `{{[[TODO]]}} ${raw}` : raw
   const now = new Date().toISOString()
-
-  const target = url.searchParams.get('page')?.trim()
-  let page: Page | null
-  if (!target) {
-    const parts = todayParts()
-    page = (await getPage(dailyId(parts))) ?? {
-      id: dailyId(parts), title: dailyTitle(parts), blocks: [], createdAt: now, updatedAt: now, isDaily: true,
-    }
-  } else {
-    const daily = parseDaily(target)
-    page = await findPage(target)
-    if (!page) {
-      page = daily
-        ? { id: dailyId(daily), title: dailyTitle(daily), blocks: [], createdAt: now, updatedAt: now, isDaily: true }
-        : {
-            id: target.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '') + '-' + generateId().slice(0, 6),
-            title: target, blocks: [], createdAt: now, updatedAt: now,
-          }
-    }
-  }
+  const page = await findOrNewPage(url.searchParams.get('page')?.trim(), now)
+  const under = url.searchParams.get('under')?.trim()
+  const after = url.searchParams.get('after')?.trim()
+  if (under && under !== 'top' && !findBlock(page.blocks, under)) return text(`Parent ^${under} not found on "${page.title}" — nothing added.`)
+  if (after && !['first', 'last'].includes(after) && !findBlock(page.blocks, after)) return text(`Block ^${after} not found on "${page.title}" — nothing added.`)
 
   // Agents sometimes load the same URL twice; ignore an identical add within 2 minutes.
   const s = store()
   const inbox = ((await s.get('inbox', { type: 'json' })) as InboxItem[] | null) ?? []
-  const dupe = inbox.find(i => i.pageId === page!.id && i.block.content === content && Date.now() - Date.parse(i.createdAt) < 120_000)
+  const dupe = inbox.find(i => i.pageId === page.id && i.block.content === content && Date.now() - Date.parse(i.createdAt) < 120_000)
   if (dupe) return text(`Already added to "${page.title}": ${content}`)
 
   const block: Block = { id: generateId(), content, children: [], checked: null, createdAt: now, updatedAt: now }
   // Drop a lone empty placeholder bullet so the new block isn't preceded by a blank one.
   if (page.blocks.length === 1 && !page.blocks[0].content.trim() && !page.blocks[0].children.length) page.blocks = []
   page.blocks.push(block)
+  // Positioned add = plain add (inbox, appended at the end) + a move op; the apps
+  // replay ops after the inbox, so old app builds still get the block.
+  let move: CloudOp | null = null
+  if (under || after) {
+    const dest = resolveDestination(page, under, after)
+    if ('error' in dest) return text(`${dest.error} — nothing added.`)
+    const res = moveBlock(page, block.id, page, dest.parentId, dest.afterId)
+    if ('error' in res) return text(`${res.error} — nothing added.`)
+    move = { id: generateId(), type: 'move', pageId: page.id, blockId: block.id, parentId: dest.parentId, afterId: res.afterId, createdAt: now }
+  }
   page.updatedAt = now
   await savePages([page])
 
   inbox.push({ id: generateId(), pageId: page.id, pageTitle: page.title, isDaily: !!page.isDaily, block, createdAt: now })
   await s.setJSON('inbox', inbox)
+  if (move) await pushOps([move])
 
-  return text(`Added to "${page.title}": ${content}`)
+  return text(`Added to "${page.title}": ${content}  ^${block.id}`)
+}
+
+/** Page by title/date; today's daily note when no title; a new (unsaved) page when missing. */
+async function findOrNewPage(target: string | undefined, now: string): Promise<Page> {
+  if (!target) {
+    const parts = todayParts()
+    return (await getPage(dailyId(parts))) ?? {
+      id: dailyId(parts), title: dailyTitle(parts), blocks: [], createdAt: now, updatedAt: now, isDaily: true,
+    }
+  }
+  const found = await findPage(target)
+  if (found) return found
+  const daily = parseDaily(target)
+  return daily
+    ? { id: dailyId(daily), title: dailyTitle(daily), blocks: [], createdAt: now, updatedAt: now, isDaily: true }
+    : {
+        id: target.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '') + '-' + generateId().slice(0, 6),
+        title: target, blocks: [], createdAt: now, updatedAt: now,
+      }
+}
+
+/**
+ * Turn the agent's ?under= / ?after= into a destination.
+ * under=<id> → child of that block (default: last child); under=top → top level.
+ * after=<id> → right after that block, as its sibling; after=first|last → ends of the list.
+ */
+function resolveDestination(
+  page: Page, under: string | undefined, after: string | undefined,
+): { error: string } | { parentId: string | null; afterId: string | null | 'last' } {
+  const parentId = under && under !== 'top' ? under : null
+  if (after && after !== 'first' && after !== 'last') {
+    const p = findParent(page.blocks, after)
+    if (p === undefined) return { error: `Block ^${after} not found on "${page.title}"` }
+    if (under && (p?.id ?? null) !== parentId) return { error: `^${after} is not a child of ${under === 'top' ? 'the top level' : `^${under}`}` }
+    return { parentId: p?.id ?? null, afterId: after }
+  }
+  return { parentId, afterId: after === 'first' ? null : 'last' }
+}
+
+function parseIds(url: URL): string[] {
+  return (url.searchParams.get('id') ?? '').split(',').map(s => s.trim()).filter(Boolean)
+}
+
+/** Save the touched pages and queue the move ops for the apps. */
+async function commitMoves(pages: Page[], ops: CloudOp[], now: string): Promise<void> {
+  for (const p of pages) p.updatedAt = now
+  await savePages(pages)
+  await pushOps(ops)
+}
+
+async function routeMove(url: URL): Promise<Response> {
+  const title = url.searchParams.get('page')?.trim()
+  const ids = parseIds(url)
+  const under = url.searchParams.get('under')?.trim()
+  const after = url.searchParams.get('after')?.trim()
+  const to = url.searchParams.get('to')?.trim()
+  if (!title || !ids.length || (!under && !after && !to)) {
+    return text('Usage: /move?page=<title>&id=<blockId>[,...]&under=<id|top>&after=<id|first|last>[&to=<other page>]', 400)
+  }
+  const src = await findPage(title)
+  if (!src) return text(`Page "${title}" not found — nothing moved.`)
+  const now = new Date().toISOString()
+  const dest = to ? await findOrNewPage(to, now) : src
+  const sameDest = dest.id === src.id
+  const target = sameDest ? src : dest
+
+  const where = resolveDestination(target, under, after)
+  if ('error' in where) return text(`${where.error} — nothing moved.`)
+  const ops: CloudOp[] = []
+  const report: string[] = []
+  // Several ids keep their order: each one lands right after the previous one.
+  let afterId = where.afterId
+  for (const id of ids) {
+    const hit = findBlock(src.blocks, id)
+    if (!hit) { report.push(`^${id}: not found`); continue }
+    const block = hit.list[hit.index]
+    const res = moveBlock(src, id, target, where.parentId, afterId)
+    if ('error' in res) { report.push(`^${id}: ${res.error}`); continue }
+    afterId = id
+    ops.push({
+      id: generateId(), type: 'move', pageId: src.id, blockId: id, parentId: where.parentId, afterId: res.afterId, createdAt: now,
+      ...(sameDest ? {} : { toPageId: target.id, toPageTitle: target.title, toIsDaily: !!target.isDaily, block: structuredClone(block) }),
+    })
+    report.push(`^${id}: moved — ${block.content.slice(0, 80)}`)
+  }
+  if (!ops.length) return text(`Nothing moved:\n${report.join('\n')}`)
+  await commitMoves(sameDest ? [src] : [src, target], ops, now)
+  return text(`${sameDest ? `On "${src.title}"` : `"${src.title}" → "${target.title}"`}:\n${report.join('\n')}`)
+}
+
+/** Indent: become the last child of the previous sibling (Tab in the app). */
+async function routeIndent(url: URL): Promise<Response> {
+  const title = url.searchParams.get('page')?.trim()
+  const ids = parseIds(url)
+  if (!title || !ids.length) return text('Usage: /indent?page=<title>&id=<blockId>[,...]', 400)
+  const page = await findPage(title)
+  if (!page) return text(`Page "${title}" not found — nothing indented.`)
+  const now = new Date().toISOString()
+  const ops: CloudOp[] = []
+  const report: string[] = []
+  for (const id of ids) {
+    const hit = findBlock(page.blocks, id)
+    if (!hit) { report.push(`^${id}: not found`); continue }
+    if (hit.index === 0) { report.push(`^${id}: no previous sibling to indent under`); continue }
+    const parentId = hit.list[hit.index - 1].id
+    const res = moveBlock(page, id, page, parentId, 'last')
+    if ('error' in res) { report.push(`^${id}: ${res.error}`); continue }
+    ops.push({ id: generateId(), type: 'move', pageId: page.id, blockId: id, parentId, afterId: res.afterId, createdAt: now })
+    report.push(`^${id}: indented under ^${parentId}`)
+  }
+  if (!ops.length) return text(`Nothing indented:\n${report.join('\n')}`)
+  await commitMoves([page], ops, now)
+  return text(`On "${page.title}":\n${report.join('\n')}`)
+}
+
+/** Outdent: become the sibling right after its parent (Shift-Tab in the app). */
+async function routeOutdent(url: URL): Promise<Response> {
+  const title = url.searchParams.get('page')?.trim()
+  const ids = parseIds(url)
+  if (!title || !ids.length) return text('Usage: /outdent?page=<title>&id=<blockId>[,...]', 400)
+  const page = await findPage(title)
+  if (!page) return text(`Page "${title}" not found — nothing outdented.`)
+  const now = new Date().toISOString()
+  const ops: CloudOp[] = []
+  const report: string[] = []
+  // Reverse order so outdented siblings keep their relative order after the parent.
+  for (const id of [...ids].reverse()) {
+    const parent = findParent(page.blocks, id)
+    if (parent === undefined) { report.push(`^${id}: not found`); continue }
+    if (parent === null) { report.push(`^${id}: already at the top level`); continue }
+    const grand = findParent(page.blocks, parent.id) ?? null
+    const parentId = grand?.id ?? null
+    const res = moveBlock(page, id, page, parentId, parent.id)
+    if ('error' in res) { report.push(`^${id}: ${res.error}`); continue }
+    ops.push({ id: generateId(), type: 'move', pageId: page.id, blockId: id, parentId, afterId: res.afterId, createdAt: now })
+    report.push(`^${id}: outdented`)
+  }
+  if (!ops.length) return text(`Nothing outdented:\n${report.reverse().join('\n')}`)
+  await commitMoves([page], ops, now) // replayed in execution order
+  return text(`On "${page.title}":\n${report.reverse().join('\n')}`)
 }
 
 async function pushOps(ops: CloudOp[]): Promise<void> {
@@ -402,7 +599,13 @@ async function routeSync(req: Request, sub: string): Promise<Response> {
     return json(((await store().get('inbox', { type: 'json' })) as InboxItem[] | null) ?? [])
   }
   if (sub === 'ops' && req.method === 'GET') {
-    return json(((await store().get('ops', { type: 'json' })) as CloudOp[] | null) ?? [])
+    const ops = ((await store().get('ops', { type: 'json' })) as CloudOp[] | null) ?? []
+    // Builds before v2 treat every non-delete op as an edit: they'd ack a move
+    // without applying it, then push their stale page back over the server's.
+    // Ops queue in order, so stop at the first move rather than skip past it.
+    if (Number(new URL(req.url).searchParams.get('v')) >= 2) return json(ops)
+    const firstMove = ops.findIndex(o => o.type === 'move')
+    return json(firstMove < 0 ? ops : ops.slice(0, firstMove))
   }
   if (sub === 'ops/ack' && req.method === 'POST') {
     const { ids } = (await req.json()) as { ids: string[] }
@@ -459,6 +662,9 @@ export default async (req: Request, _context: Context): Promise<Response> => {
       case 'add': return await routeAdd(url)
       case 'edit': return await routeEdit(url)
       case 'delete': return await routeDelete(url)
+      case 'move': return await routeMove(url)
+      case 'indent': return await routeIndent(url)
+      case 'outdent': return await routeOutdent(url)
     }
     return text(`Unknown route. See ${base}/`, 404)
   } catch (err) {

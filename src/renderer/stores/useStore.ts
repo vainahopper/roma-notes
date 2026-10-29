@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import type { Page, Block } from '../../shared/types'
 import { generateId, todayPageId, todayPageTitle } from '../utils/helpers'
 import { platform } from '../platform'
+import { replayCloudOps } from '../utils/cloudOps'
 import { queueCloudPush, queueCloudDelete, cloudCatchUp, fetchCloudInbox, ackCloudInbox, fetchCloudOps, ackCloudOps, cloudEnabled } from '../utils/cloudBridge'
 
 // Global store using a simple event emitter pattern
@@ -157,41 +158,12 @@ async function applyCloudInbox() {
   await ackCloudInbox(items.map(i => i.id))
 }
 
-/** Replay the agent's block edits/deletes on local pages (after the inbox, so
- *  an add followed by an edit/delete of the same block lands in order). */
+/** Replay the agent's block edits/deletes/moves on local pages (after the inbox,
+ *  so an add followed by an edit/move of the same block lands in order). */
 async function applyCloudOps() {
   const ops = await fetchCloudOps()
   if (!ops.length) return
-  const touched = new Map<string, Page>()
-  // Copy-on-write the path to the block so React sees new objects
-  const update = (bs: Block[], id: string, fn: (b: Block) => Block | null): [Block[], boolean] => {
-    let hit = false
-    const out: Block[] = []
-    for (const b of bs) {
-      if (b.id === id) {
-        hit = true
-        const next = fn(b)
-        if (next) out.push(next)
-        continue
-      }
-      const [children, inner] = hit ? [b.children, false] : update(b.children, id, fn)
-      if (inner) hit = true
-      out.push(inner ? { ...b, children } : b)
-    }
-    return [out, hit]
-  }
-  for (const op of ops) {
-    const page = touched.get(op.pageId) ?? storeState.pages.get(op.pageId)
-    if (!page) continue
-    const now = new Date().toISOString()
-    const [blocks, hit] = update(page.blocks, op.blockId, b =>
-      op.type === 'delete' ? null : { ...b, content: op.content ?? b.content, updatedAt: now })
-    if (!hit) continue // block already gone or never synced here
-    // Never leave a page with no bullet to type into
-    const safe = blocks.length ? blocks : [{ id: generateId(), content: '', children: [], checked: null }]
-    touched.set(page.id, { ...page, blocks: safe })
-  }
-  for (const page of touched.values()) await savePage(page)
+  for (const page of replayCloudOps(ops, id => storeState.pages.get(id))) await savePage(page)
   await ackCloudOps(ops.map(o => o.id))
 }
 

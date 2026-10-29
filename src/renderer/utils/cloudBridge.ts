@@ -20,10 +20,18 @@ export interface InboxItem {
 /** An agent edit/delete to replay on the local page (adds come via the inbox). */
 export interface CloudOp {
   id: string
-  type: 'edit' | 'delete'
+  type: 'edit' | 'delete' | 'move'
   pageId: string
   blockId: string
   content?: string
+  // move: destination (parentId null = top level, afterId null = first).
+  // Cross-page moves also carry the target page and the block itself.
+  toPageId?: string
+  toPageTitle?: string
+  toIsDaily?: boolean
+  parentId?: string | null
+  afterId?: string | null
+  block?: Block
   createdAt: string
 }
 
@@ -117,7 +125,7 @@ export async function ackCloudInbox(ids: string[]): Promise<void> {
 
 export async function fetchCloudOps(): Promise<CloudOp[]> {
   if (!BASE) return []
-  const res = await fetch(`${BASE}/sync/ops`)
+  const res = await fetch(`${BASE}/sync/ops?v=2`) // v2: understands move ops
   if (!res.ok) throw new Error(`cloud ops: ${res.status}`)
   return res.json()
 }
