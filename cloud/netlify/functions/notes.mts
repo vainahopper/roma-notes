@@ -624,15 +624,38 @@ async function routeSync(req: Request, sub: string): Promise<Response> {
   return text('Not found', 404)
 }
 
-function isAgentAuthorized(req: Request): boolean {
-  const password = Netlify.env.get('ROMA_AGENT_PASSWORD')
+// Each agent has its own password so access can be revoked one at a time.
+// Grok's browser may not send Basic auth, so it can also put its password in the
+// URL: /n/<token>/k/<password>/... (keeps every link in the help text working) or ?key=.
+const AGENTS: { name: string; env: string; urlKey: boolean }[] = [
+  { name: 'instinct', env: 'ROMA_AGENT_PASSWORD', urlKey: false },
+  { name: 'grok', env: 'ROMA_GROK_PASSWORD', urlKey: true },
+]
+
+function authorizedAgent(req: Request, urlKey: string | null): string | null {
   const header = req.headers.get('authorization') ?? ''
-  if (!password || !header.startsWith('Basic ')) return false
-  try {
-    return atob(header.slice(6)) === `instinct:${password}`
-  } catch {
-    return false
+  let basic: string | null = null
+  if (header.startsWith('Basic ')) {
+    try { basic = atob(header.slice(6)) } catch { basic = null }
   }
+  for (const agent of AGENTS) {
+    const password = Netlify.env.get(agent.env)
+    if (!password) continue
+    if (basic === `${agent.name}:${password}`) return agent.name
+    if (agent.urlKey && urlKey === password) return agent.name
+  }
+  return null
+}
+
+const WRITE_ROUTES = new Set(['add', 'edit', 'delete', 'move', 'indent', 'outdent'])
+
+// Who wrote what: last 1000 agent writes, readable in the "log" blob.
+async function logWrite(agent: string, route: string, url: URL, res: Response) {
+  const s = store()
+  const log = ((await s.get('log', { type: 'json' })) as unknown[] | null) ?? []
+  const params = Object.fromEntries([...url.searchParams].filter(([k]) => k !== 'key'))
+  log.push({ agent, route, params, status: res.status, at: new Date().toISOString() })
+  await s.setJSON('log', log.slice(-1000))
 }
 
 export default async (req: Request, _context: Context): Promise<Response> => {
@@ -641,30 +664,40 @@ export default async (req: Request, _context: Context): Promise<Response> => {
   const secret = Netlify.env.get('ROMA_TOKEN')
   if (!secret || token !== secret) return text('Not found', 404)
 
-  const route = rest.join('/').replace(/\/$/, '')
-  const base = `${url.origin}/n/${token}`
+  // Optional /k/<password>/ segment (see AGENTS)
+  const pathKey = rest[0] === 'k' && rest.length > 1 ? rest[1] : null
+  const parts = pathKey ? rest.slice(2) : rest
+  const route = parts.join('/').replace(/\/$/, '')
+  const base = `${url.origin}/n/${token}${pathKey ? `/k/${pathKey}` : ''}`
   try {
     // The apps authenticate with the path token alone; the agent routes also need
-    // HTTP Basic auth (user "instinct", password ROMA_AGENT_PASSWORD).
+    // an agent password (see AGENTS).
     if (route.startsWith('sync/')) return await routeSync(req, route.slice(5))
-    if (!isAgentAuthorized(req)) {
-      return new Response('Authentication required (user: instinct)', {
+    const agent = authorizedAgent(req, pathKey ?? url.searchParams.get('key'))
+    if (!agent) {
+      return new Response('Authentication required', {
         status: 401,
         headers: { 'www-authenticate': 'Basic realm="Roma Research", charset="UTF-8"', 'content-type': 'text/plain; charset=utf-8' },
       })
     }
-    switch (route) {
-      case '': return text(help(base))
-      case 'today': return await routeToday()
-      case 'page': return await routePage(url)
-      case 'search': return await routeSearch(url)
-      case 'recent': return await routeRecent(url)
-      case 'add': return await routeAdd(url)
-      case 'edit': return await routeEdit(url)
-      case 'delete': return await routeDelete(url)
-      case 'move': return await routeMove(url)
-      case 'indent': return await routeIndent(url)
-      case 'outdent': return await routeOutdent(url)
+    const handlers: Record<string, () => Promise<Response>> = {
+      '': async () => text(help(base)),
+      today: routeToday,
+      page: () => routePage(url),
+      search: () => routeSearch(url),
+      recent: () => routeRecent(url),
+      add: () => routeAdd(url),
+      edit: () => routeEdit(url),
+      delete: () => routeDelete(url),
+      move: () => routeMove(url),
+      indent: () => routeIndent(url),
+      outdent: () => routeOutdent(url),
+    }
+    const handler = handlers[route]
+    if (handler) {
+      const res = await handler()
+      if (WRITE_ROUTES.has(route)) await logWrite(agent, route, url, res)
+      return res
     }
     return text(`Unknown route. See ${base}/`, 404)
   } catch (err) {
