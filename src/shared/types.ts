@@ -35,6 +35,8 @@ export interface SearchResult {
 
 export interface AppSettings {
   theme: 'light' | 'dark' | 'system'
+  /** Visual style: 'roma' (default, macOS-glass) or 'roam' (Roam Research-inspired) */
+  uiStyle?: 'roma' | 'roam'
   fontSize: number
   encryptionEnabled: boolean
 }

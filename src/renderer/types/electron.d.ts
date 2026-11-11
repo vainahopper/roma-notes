@@ -22,6 +22,8 @@ interface ElectronAPI {
   hasKey: (blockId: string) => Promise<boolean>
   getKey: (blockId: string) => Promise<string | null>
   deleteKey: (blockId: string) => Promise<boolean>
+  hasAnyKey: () => Promise<boolean>
+  getAllKeys: () => Promise<string[]>
 }
 
 declare global {

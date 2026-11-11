@@ -17,6 +17,10 @@
   border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
   background: var(--bg-secondary);
+  /* Stays pinned at the top of the scroll region while the page scrolls (Roam-style) */
+  position: sticky;
+  top: 0;
+  z-index: 5;
 }
 
 .is-sidebar .block-breadcrumbs {
@@ -170,6 +174,25 @@
   font-size: 18px;
 }
 
+/* Zoomed TODO block: checkbox sits inline with the protagonist title */
+.zoom-hero-title.zoom-hero-todo {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.zoom-hero-checkbox {
+  flex-shrink: 0;
+  margin-top: 6px;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  display: inline-flex;
+}
+.is-sidebar .zoom-hero-checkbox {
+  margin-top: 3px;
+}
+
 /* Scrollable area: blocks + references */
 .page-scroll {
   flex: 1;
@@ -233,3 +256,19 @@
 .modal-btn.secondary:hover { background: var(--bg-active); }
 .modal-btn.danger { background: var(--red); color: white; }
 .modal-btn.danger:hover { background: #dc2626; }
+
+/* Subtle "View in Daily Notes" link under a day page's title */
+.page-daily-feed-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
+  padding: 2px 6px 2px 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  transition: color var(--transition);
+}
+.page-daily-feed-link:hover {
+  color: var(--accent);
+}

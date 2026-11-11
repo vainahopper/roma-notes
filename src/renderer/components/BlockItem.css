@@ -26,6 +26,18 @@
   min-height: 26px;
 }
 
+/* Exclude row "chrome" (collapse toggle, bullet, drag handle, checkbox) from text
+   selection so a native copy/paste never captures the drag-handle dots — only the
+   actual block content should land in the clipboard. */
+.block-toggle-area,
+.block-bullet-area,
+.block-drag-handle,
+.block-bullet,
+.block-checkbox {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 .block-children {
   padding-left: 6px;
   margin-left: 24px;   /* aligns left edge with bullet center (toggle 14px + half bullet-area 11px = 25px ≈ 24px) */

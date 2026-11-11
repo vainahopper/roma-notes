@@ -1,11 +1,12 @@
 {
   "name": "roma-notes",
-  "version": "1.8.6",
+  "version": "1.8.25",
   "description": "A Roam Research-inspired note-taking app for macOS",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && NODE_ENV=development electron .\"",
     "start": "npm run build && electron .",
+    "test": "node scripts/test-merge.js && node scripts/test-icloud-sync.js && node scripts/test-reference-splice.js",
     "build": "vite build && node build-electron.js",
     "dist": "npm run build && electron-builder --mac dmg --arm64 && node post-dist.js",
     "pack": "npm run build && electron-builder --dir",
@@ -17,7 +18,7 @@
   },
   "build": {
     "appId": "com.codevainas.roma-notes",
-    "productName": "Roma Notes",
+    "productName": "Roma Research",
     "asar": true,
     "directories": {
       "output": "release"
@@ -46,8 +47,8 @@
       ]
     },
     "dmg": {
-      "title": "Roma Notes",
-      "artifactName": "Roma Notes.dmg",
+      "title": "Roma Research",
+      "artifactName": "Roma Research.dmg",
       "contents": [
         {
           "x": 130,
@@ -71,6 +72,7 @@
   "license": "MIT",
   "devDependencies": {
     "@types/crypto-js": "^4.2.2",
+    "@types/d3-force": "^3.0.10",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.4",
@@ -89,6 +91,7 @@
     "@capacitor/ios": "^8.1.0",
     "adm-zip": "^0.5.16",
     "crypto-js": "^4.2.0",
+    "d3-force": "^3.0.0",
     "date-fns": "^4.1.0",
     "fuse.js": "^7.1.0",
     "react": "^19.2.4",

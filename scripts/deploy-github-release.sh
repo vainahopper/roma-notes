@@ -1,5 +1,5 @@
 #!/bin/bash
-# Deploy Roma Notes DMG to GitHub Releases for remote auto-update.
+# Deploy Roma Research DMG to GitHub Releases for remote auto-update.
 # Usage: npm run deploy:github
 #
 # Prerequisites (one-time):
@@ -18,13 +18,13 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$SCRIPT_DIR/.."
 RELEASE_DIR="$PROJECT_DIR/release"
 VERSION=$(node -p "require('${PROJECT_DIR}/package.json').version")
-DMG_SOURCE="$RELEASE_DIR/Roma Notes.dmg"
+DMG_SOURCE="$RELEASE_DIR/Roma Research.dmg"
 DMG_UPLOAD="$RELEASE_DIR/Roma-Notes.dmg"
 
 REPO="vainahopper/roma-notes"
 TAG="latest"
 
-echo "═══ Deploying Roma Notes v${VERSION} to GitHub Releases ═══"
+echo "═══ Deploying Roma Research v${VERSION} to GitHub Releases ═══"
 
 # Verify DMG exists
 if [ ! -f "$DMG_SOURCE" ]; then
@@ -41,7 +41,7 @@ DMG_URL="https://github.com/${REPO}/releases/download/${TAG}/Roma-Notes.dmg"
 cat > "$RELEASE_DIR/latest.json" << EOF
 {
   "version": "$VERSION",
-  "notes": "Roma Notes ${VERSION}",
+  "notes": "Roma Research ${VERSION}",
   "dmgUrl": "${DMG_URL}"
 }
 EOF
@@ -57,8 +57,8 @@ echo ""
 # Create new release with assets
 "$GH" release create "$TAG" \
   --repo "$REPO" \
-  --title "Roma Notes v${VERSION}" \
-  --notes "Roma Notes v${VERSION}" \
+  --title "Roma Research v${VERSION}" \
+  --notes "Roma Research v${VERSION}" \
   --latest \
   "$DMG_UPLOAD#Roma-Notes.dmg" \
   "$RELEASE_DIR/latest.json#latest.json"
@@ -67,5 +67,5 @@ echo ""
 rm -f "$DMG_UPLOAD"
 
 echo ""
-echo "✓ Roma Notes v${VERSION} published to GitHub Releases"
+echo "✓ Roma Research v${VERSION} published to GitHub Releases"
 echo "  https://github.com/${REPO}/releases/tag/${TAG}"

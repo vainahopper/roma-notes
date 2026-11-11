@@ -12,8 +12,8 @@ const { execSync } = require('child_process')
 const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf-8'))
 const version = pkg.version
 
-const dmgPath = path.join(__dirname, 'release', 'Roma Notes.dmg')
-const builtAppPath = path.join(__dirname, 'release', 'mac-arm64', 'Roma Notes.app')
+const dmgPath = path.join(__dirname, 'release', 'Roma Research.dmg')
+const builtAppPath = path.join(__dirname, 'release', 'mac-arm64', 'Roma Research.app')
 const dataDir = path.join(os.homedir(), 'Library', 'Application Support', 'RomaNotes')
 const latestPath = path.join(dataDir, 'latest.json')
 
@@ -42,7 +42,7 @@ if (!fs.existsSync(dataDir)) {
 
 const manifest = {
   version,
-  notes: `Roma Notes ${version} is ready to install.`,
+  notes: `Roma Research ${version} is ready to install.`,
   dmgPath,
 }
 
@@ -52,4 +52,4 @@ console.log(`   version: ${version}`)
 console.log(`   dmgPath: ${dmgPath}`)
 console.log('')
 console.log('The installed app will detect this update on next launch or via')
-console.log('"Roma Notes > Check for Updates…"')
+console.log('"Roma Research > Check for Updates…"')

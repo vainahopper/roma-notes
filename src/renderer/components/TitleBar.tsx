@@ -4,9 +4,7 @@ import './TitleBar.css'
 declare const __APP_VERSION__: string
 
 interface Props {
-  theme: 'dark' | 'light'
-  themeMode?: 'dark' | 'light' | 'system'
-  onToggleTheme: () => void
+  onCalendar: () => void
   onToggleSidebar: () => void
   onSearch: () => void
   onToday: () => void
@@ -19,13 +17,9 @@ interface Props {
 }
 
 export function TitleBar({
-  theme, themeMode = theme, onToggleTheme, onToggleSidebar, onSearch, onToday, onNewPage,
+  onCalendar, onToggleSidebar, onSearch, onToday, onNewPage,
   sidebarOpen, canBack = false, canForward = false, onBack, onForward,
 }: Props) {
-  const themeTitle = themeMode === 'system' ? 'Theme: System (click to cycle)'
-    : themeMode === 'dark' ? 'Theme: Dark (click to cycle)'
-    : 'Theme: Light (click to cycle)'
-
   return (
     <div className="titlebar titlebar-drag">
       {/* Left: sidebar toggle + back/forward */}
@@ -67,7 +61,7 @@ export function TitleBar({
       </div>
 
       <div className="titlebar-center">
-        <span className="app-name">Roma Notes</span>
+        <span className="app-name">Roma Research</span>
         <span className="titlebar-version">v{__APP_VERSION__}</span>
       </div>
 
@@ -86,26 +80,13 @@ export function TitleBar({
           </svg>
         </button>
 
-        <button className="titlebar-btn" onClick={onToggleTheme} title={themeTitle}>
-          {themeMode === 'system' ? (
-            <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-              <circle cx="7.5" cy="7.5" r="4" stroke="currentColor" strokeWidth="1.2"/>
-              <path d="M7.5 3.5V11.5" stroke="currentColor" strokeWidth="1.2"/>
-              <path d="M7.5 3.5C5.3 3.5 3.5 5.3 3.5 7.5S5.3 11.5 7.5 11.5" fill="currentColor"/>
-            </svg>
-          ) : theme === 'dark' ? (
-            <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-              <circle cx="7.5" cy="7.5" r="3" stroke="currentColor" strokeWidth="1.2"/>
-              <line x1="7.5" y1="1" x2="7.5" y2="2.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-              <line x1="7.5" y1="12.5" x2="7.5" y2="14" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-              <line x1="1" y1="7.5" x2="2.5" y2="7.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-              <line x1="12.5" y1="7.5" x2="14" y2="7.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-            </svg>
-          ) : (
-            <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-              <path d="M8 2.5C8 2.5 6 3.5 6 7.5C6 11.5 8 12.5 8 12.5C4.5 12.5 2 10.5 2 7.5C2 4.5 4.5 2.5 8 2.5Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
-            </svg>
-          )}
+        <button className="titlebar-btn" onClick={onCalendar} title="Calendar">
+          <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+            <rect x="1.5" y="2.5" width="12" height="11" rx="1.5" stroke="currentColor" strokeWidth="1.2"/>
+            <line x1="1.5" y1="6" x2="13.5" y2="6" stroke="currentColor" strokeWidth="1.2"/>
+            <line x1="4.5" y1="1" x2="4.5" y2="4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+            <line x1="10.5" y1="1" x2="10.5" y2="4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+          </svg>
         </button>
       </div>
     </div>

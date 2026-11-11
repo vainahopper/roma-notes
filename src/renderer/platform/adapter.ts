@@ -34,6 +34,10 @@ export interface PlatformAdapter {
   hasKey(blockId: string): Promise<boolean>
   getKey(blockId: string): Promise<string | null>
   deleteKey(blockId: string): Promise<boolean>
+  /** True if this device has stored at least one block password. */
+  hasAnyKey(): Promise<boolean>
+  /** Every distinct block password stored on this device. Call only after a successful biometric prompt. */
+  getAllKeys(): Promise<string[]>
 
   // ─── Menu events (Electron-only, no-op on mobile) ──────────────────────────
   onMenuEvent(callback: (event: string, ...args: any[]) => void): void

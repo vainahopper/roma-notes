@@ -138,9 +138,10 @@
     box-shadow: var(--shadow-lg);
   }
 
-  .sidebar-action-btn {
-    padding: 10px 12px;
-    font-size: 14px;
+  .sidebar-nav-item {
+    min-height: 42px;
+    padding: 9px 12px;
+    font-size: 15px;
   }
 
   .sidebar-section-header {
@@ -331,10 +332,6 @@
 
   .daily-notes-view {
     -webkit-overflow-scrolling: touch;
-  }
-
-  .daily-notes-header {
-    padding: 20px 16px 0;
   }
 
   .daily-notes-list {

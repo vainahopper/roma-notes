@@ -146,23 +146,75 @@ export function getMobilePopupStyle(
 
 // ─── Block search utilities ───────────────────────────────────────────────────
 
-export function findBlocksWithLink(blocks: Block[], titleLower: string, idLower: string): Block[] {
-  const results: Block[] = []
-  // Match #tag with word boundary, and Key:: attribute syntax
+export interface BlockMatch {
+  block: Block
+  parents: Block[]
+}
+
+export function findBlocksWithLink(blocks: Block[], titleLower: string, idLower: string): BlockMatch[] {
+  const results: BlockMatch[] = []
   const tagRegex = new RegExp(`(?:#\\[\\[(?:${escapeRegex(titleLower)}|${escapeRegex(idLower)})\\]\\]|#(?:${escapeRegex(titleLower)}|${escapeRegex(idLower)})(?=[^A-Za-z0-9_À-ÿ-]|$))`)
   const attrRegex = new RegExp(`^(?:${escapeRegex(titleLower)}|${escapeRegex(idLower)})::`, 'm')
-  function traverse(block: Block) {
+  function traverse(block: Block, parents: Block[]) {
     const c = block.content.toLowerCase()
     if (
       c.includes(`[[${titleLower}]]`) || c.includes(`[[${idLower}]]`) ||
       tagRegex.test(c) || attrRegex.test(c)
     ) {
-      results.push(block)
+      results.push({ block, parents: parents.slice() })
     }
-    block.children.forEach(traverse)
+    const nextParents = [...parents, block]
+    block.children.forEach(child => traverse(child, nextParents))
   }
-  blocks.forEach(traverse)
+  blocks.forEach(b => traverse(b, []))
   return results
+}
+
+/**
+ * Reinsert an edited block subtree (from the references panel's scoped editor)
+ * back into a page's block tree.
+ *
+ * `editedSubtree[0]` is the edited matched block (id === matchBlockId in the
+ * normal case — BlockEditor's guards prevent it being deleted or outdented past
+ * root). `editedSubtree[1..]` are new sibling blocks the user created (Enter /
+ * Shift+Tab); they replace the matched node's position.
+ *
+ * Idempotent: any block whose id already appears anywhere in `editedSubtree`
+ * (e.g. a sibling inserted by an earlier save of the same editing session) is
+ * removed from its old spot, so re-running the splice with the same subtree —
+ * which happens because the debounced save and the on-blur flush both fire —
+ * does not duplicate the new siblings.
+ *
+ * If the matched id is not found, the input is returned unchanged.
+ */
+export function spliceSubtreeIntoPage(
+  pageBlocks: Block[],
+  matchBlockId: string,
+  editedSubtree: Block[],
+): Block[] {
+  if (!editedSubtree || editedSubtree.length === 0) return pageBlocks
+  const editedIds = new Set<string>()
+  const collect = (b: Block) => { editedIds.add(b.id); b.children?.forEach(collect) }
+  editedSubtree.forEach(collect)
+
+  let found = false
+  function walk(list: Block[]): Block[] {
+    const out: Block[] = []
+    for (const b of list) {
+      if (b.id === matchBlockId) {
+        found = true
+        for (const r of editedSubtree) out.push(r)
+      } else if (editedIds.has(b.id)) {
+        // Stale copy of a block the edited subtree now owns — drop it.
+        continue
+      } else {
+        out.push({ ...b, children: walk(b.children ?? []) })
+      }
+    }
+    return out
+  }
+  const result = walk(pageBlocks)
+  return found ? result : pageBlocks
 }
 
 function escapeRegex(s: string): string {
@@ -180,4 +232,48 @@ export function getLinksFromBlocks(blocks: import('../../shared/types').Block[])
   }
   blocks.forEach(traverse)
   return Array.from(links)
+}
+
+// ─── Clipboard HTML: nested bullet lists for pasting into rich-text apps ──────────
+// Plain-text copy already emits "- " + 4-space indentation (Roam style). Rich
+// editors (Apple Notes, Word, Google Docs, email, Slack) render real bullets only
+// from text/html, so we also emit a nested <ul><li> tree.
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
+// Convert a single block's Roam markup to inline HTML (bold/italic/highlight/code,
+// TODO checkboxes; wikilinks/tags reduced to their text).
+export function blockContentToInlineHtml(content: string): string {
+  let h = escapeHtml(content)
+  h = h
+    .replace(/\{\{(?:\[\[)?DONE(?:\]\])?\}\}/g, '☑ ')
+    .replace(/\{\{(?:\[\[)?TODO(?:\]\])?\}\}/g, '☐ ')
+    .replace(/#\[\[([^\]]+)\]\]/g, '$1')
+    .replace(/\[\[([^\]]+)\]\]/g, '$1')
+    .replace(/#([A-Za-z0-9_À-ÿ-]+)/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/__([^_]+)__/g, '<em>$1</em>')
+    .replace(/\^\^([^^]+)\^\^/g, '<mark>$1</mark>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+  return h
+}
+
+function blockToHtmlLi(b: Block): string {
+  const inner = blockContentToInlineHtml(b.content)
+  if (b.children && b.children.length > 0) {
+    const kids = b.children.map(blockToHtmlLi).join('')
+    return `<li>${inner}<ul>${kids}</ul></li>`
+  }
+  return `<li>${inner}</li>`
+}
+
+// Build a nested <ul> for the given root blocks (each includes its full subtree).
+export function blocksToHtmlList(roots: Block[]): string {
+  if (roots.length === 0) return ''
+  return `<ul>${roots.map(blockToHtmlLi).join('')}</ul>`
 }

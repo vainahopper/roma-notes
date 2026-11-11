@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useCallback } from 'react'
 import type { Page } from '../../shared/types'
+import { ALL_PAGES_VIEW, GRAPH_VIEW } from '../utils/views'
 import './Sidebar.css'
 
 declare const __APP_VERSION__: string
@@ -10,10 +11,9 @@ interface Props {
   mainView: string
   onNavigate: (id: string, title?: string) => void
   onShowDailyNotes: () => void
-  onToday: () => void
-  onNewPage: () => void
-  onShowSearch: () => void
-  onShowCalendar: () => void
+  onShowAllPages: () => void
+  onShowGraph: () => void
+  onShowSettings?: () => void
   pagesExpanded: boolean
   onTogglePagesExpanded: () => void
   onToggleStar: (pageId: string) => void
@@ -27,9 +27,9 @@ interface Props {
 }
 
 export function Sidebar({
-  pages, activePageId, mainView, onNavigate, onShowDailyNotes, onToday, onNewPage, onShowSearch,
-  onShowCalendar, pagesExpanded, onTogglePagesExpanded, onToggleStar, onDeletePage, starredOrder,
-  onReorderStarred, updateVersion, onShowUpdateDialog, appVersion, syncStatus,
+  pages, activePageId, mainView, onNavigate, onShowDailyNotes, onShowAllPages, onShowGraph,
+  pagesExpanded, onTogglePagesExpanded, onToggleStar, onDeletePage, starredOrder,
+  onReorderStarred, updateVersion, onShowUpdateDialog, appVersion, syncStatus, onShowSettings,
 }: Props) {
   const [filterText, setFilterText] = useState('')
   const [starredExpanded, setStarredExpanded] = useState(true)
@@ -101,53 +101,50 @@ export function Sidebar({
 
   return (
     <div className="sidebar">
-      {/* Top action buttons */}
-      <div className="sidebar-actions">
-        {/* Daily Notes feed button */}
+      {/* Primary navigation — Roam-style: Daily Notes highlighted, then All Pages + Graph */}
+      <nav className="sidebar-nav">
         <button
-          className={`sidebar-action-btn primary ${isDailyActive ? 'active' : ''}`}
+          className={`sidebar-nav-item daily ${isDailyActive ? 'active' : ''}`}
           onClick={onShowDailyNotes}
-          title="Daily Notes"
         >
-          <svg width="14" height="14" viewBox="0 0 15 15" fill="none">
-            <rect x="2" y="1" width="11" height="13" rx="1.5" stroke="currentColor" strokeWidth="1.2"/>
-            <line x1="5" y1="1" x2="5" y2="14" stroke="currentColor" strokeWidth="1.2"/>
-            <line x1="7" y1="5" x2="11" y2="5" stroke="currentColor" strokeWidth="1"/>
-            <line x1="7" y1="7.5" x2="11" y2="7.5" stroke="currentColor" strokeWidth="1"/>
-            <line x1="7" y1="10" x2="10" y2="10" stroke="currentColor" strokeWidth="1"/>
+          <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+            <rect x="1.5" y="2.5" width="12" height="11" rx="1.5" stroke="currentColor" strokeWidth="1.3"/>
+            <line x1="1.5" y1="6" x2="13.5" y2="6" stroke="currentColor" strokeWidth="1.3"/>
+            <line x1="4.5" y1="1" x2="4.5" y2="4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+            <line x1="10.5" y1="1" x2="10.5" y2="4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+            <rect x="4" y="8.3" width="2.2" height="2.2" rx="0.4" fill="currentColor"/>
           </svg>
           Daily Notes
         </button>
-
-        {/* Calendar picker */}
-        <button className="sidebar-action-btn" onClick={onShowCalendar} title="Calendar">
-          <svg width="14" height="14" viewBox="0 0 15 15" fill="none">
-            <rect x="1" y="3" width="13" height="11" rx="1.5" stroke="currentColor" strokeWidth="1.2"/>
-            <line x1="1" y1="6.5" x2="14" y2="6.5" stroke="currentColor" strokeWidth="1.2"/>
-            <line x1="4.5" y1="1" x2="4.5" y2="5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-            <line x1="10.5" y1="1" x2="10.5" y2="5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-            <rect x="4" y="8.5" width="2" height="2" rx="0.4" fill="currentColor"/>
-            <rect x="6.75" y="8.5" width="2" height="2" rx="0.4" fill="currentColor"/>
-            <rect x="9.5" y="8.5" width="2" height="2" rx="0.4" fill="currentColor"/>
+        <button
+          className={`sidebar-nav-item ${mainView === ALL_PAGES_VIEW ? 'active' : ''}`}
+          onClick={onShowAllPages}
+        >
+          <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+            <line x1="5" y1="3.5" x2="13" y2="3.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+            <line x1="5" y1="7.5" x2="13" y2="7.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+            <line x1="5" y1="11.5" x2="13" y2="11.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+            <circle cx="2.2" cy="3.5" r="0.9" fill="currentColor"/>
+            <circle cx="2.2" cy="7.5" r="0.9" fill="currentColor"/>
+            <circle cx="2.2" cy="11.5" r="0.9" fill="currentColor"/>
           </svg>
+          All Pages
         </button>
-
-        {/* Search */}
-        <button className="sidebar-action-btn" onClick={onShowSearch} title="Search">
-          <svg width="14" height="14" viewBox="0 0 15 15" fill="none">
-            <circle cx="6.5" cy="6.5" r="4.5" stroke="currentColor" strokeWidth="1.2"/>
-            <line x1="9.5" y1="9.5" x2="13.5" y2="13.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+        <button
+          className={`sidebar-nav-item ${mainView === GRAPH_VIEW ? 'active' : ''}`}
+          onClick={onShowGraph}
+        >
+          <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+            <circle cx="3.5" cy="4" r="1.8" stroke="currentColor" strokeWidth="1.2"/>
+            <circle cx="11.5" cy="3.5" r="1.8" stroke="currentColor" strokeWidth="1.2"/>
+            <circle cx="7.5" cy="11.5" r="1.8" stroke="currentColor" strokeWidth="1.2"/>
+            <line x1="5.2" y1="4.2" x2="9.7" y2="3.7" stroke="currentColor" strokeWidth="1.1"/>
+            <line x1="4.4" y1="5.6" x2="6.6" y2="9.9" stroke="currentColor" strokeWidth="1.1"/>
+            <line x1="10.6" y1="5.1" x2="8.4" y2="9.9" stroke="currentColor" strokeWidth="1.1"/>
           </svg>
+          Graph
         </button>
-
-        {/* New page */}
-        <button className="sidebar-action-btn" onClick={onNewPage} title="New Page">
-          <svg width="14" height="14" viewBox="0 0 15 15" fill="none">
-            <line x1="7.5" y1="2" x2="7.5" y2="13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-            <line x1="2" y1="7.5" x2="13" y2="7.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-          </svg>
-        </button>
-      </div>
+      </nav>
 
       {/* Filter */}
       <div className="sidebar-filter">
@@ -243,7 +240,18 @@ export function Sidebar({
         {syncStatus && (
           <div className="sidebar-sync-status">{syncStatus}</div>
         )}
-        <div className="sidebar-version">v{appVersion ?? __APP_VERSION__}</div>
+        <div className="sidebar-bottom-row">
+          {onShowSettings && (
+            <button className="sidebar-settings-btn" onClick={onShowSettings} title="Settings (⌘,)">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+                <circle cx="8" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.3"/>
+                <path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+              </svg>
+              Settings
+            </button>
+          )}
+          <div className="sidebar-version">v{appVersion ?? __APP_VERSION__}</div>
+        </div>
       </div>
     </div>
   )

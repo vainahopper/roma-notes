@@ -6,19 +6,6 @@
   position: relative;
 }
 
-.daily-notes-header {
-  padding: 52px 80px 0;
-  flex-shrink: 0;
-}
-
-.daily-notes-title {
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.10em;
-  color: var(--text-muted);
-  margin-bottom: 0;
-}
 
 .daily-notes-list {
   padding: 0 80px 100px;

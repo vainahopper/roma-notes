@@ -36,6 +36,8 @@ export function createElectronAdapter(): PlatformAdapter {
     hasKey: (blockId) => api.hasKey(blockId),
     getKey: (blockId) => api.getKey(blockId),
     deleteKey: (blockId) => api.deleteKey(blockId),
+    hasAnyKey: () => api.hasAnyKey(),
+    getAllKeys: () => api.getAllKeys(),
 
     // Menu events
     onMenuEvent: (callback) => api.onMenuEvent(callback),

@@ -2,69 +2,16 @@
   width: var(--sidebar-width);
   min-width: var(--sidebar-min);
   max-width: var(--sidebar-max);
+  /* --bg-glass is 85–92% opaque and native macOS vibrancy already sits under the
+     window, so a CSS backdrop-filter here added continuous GPU compositing for a
+     blur that's barely visible. Dropped it to cut idle energy use. */
   background: var(--bg-glass);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
   border-right: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
   overflow: hidden;
   flex-shrink: 0;
 }
-
-.sidebar-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border-subtle);
-  flex-shrink: 0;
-}
-
-.sidebar-action-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border-radius: var(--radius-sm);
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-secondary);
-  transition: background var(--transition), color var(--transition);
-  cursor: pointer;
-}
-
-.sidebar-action-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-.sidebar-action-btn.primary {
-  background: transparent;
-  color: var(--text-secondary);
-  flex: 1;
-}
-
-.sidebar-action-btn.primary:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-.sidebar-action-btn.primary.active {
-  background: var(--accent-dim);
-  color: var(--accent);
-}
-
-.sidebar-action-btn.primary.active:hover {
-  background: rgba(99, 102, 241, 0.3);
-  color: var(--accent-hover);
-}
-
-.sidebar-action-btn:focus { outline: none; }
-.filter-input:focus { outline: none; }
-.sidebar-section-header:focus { outline: none; }
-.sidebar-item:focus { outline: none; }
-.filter-clear:focus { outline: none; }
 
 /* Filter */
 .sidebar-filter {
@@ -341,3 +288,69 @@
   border-radius: 1px;
   pointer-events: none;
 }
+
+/* Settings button + version row */
+.sidebar-bottom-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.sidebar-settings-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  color: var(--text-muted);
+  transition: background var(--transition), color var(--transition);
+}
+
+.sidebar-settings-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* ─── Primary nav (Daily Notes / All Pages / Graph) ───────────── */
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 10px 6px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.sidebar-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 30px;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-align: left;
+  transition: background var(--transition), color var(--transition);
+}
+.sidebar-nav-item svg { flex-shrink: 0; opacity: 0.85; }
+.sidebar-nav-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.sidebar-nav-item.active {
+  background: var(--bg-selected);
+  color: var(--accent);
+}
+.sidebar-nav-item.active svg { opacity: 1; }
+
+/* Daily Notes is the home page — slightly more prominent */
+.sidebar-nav-item.daily {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.sidebar-nav-item.daily.active { color: var(--accent); }

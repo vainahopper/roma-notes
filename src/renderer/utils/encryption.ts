@@ -1,7 +1,7 @@
 import CryptoJS from 'crypto-js'
 
 // ─── Legacy (v1) — CryptoJS AES with EVP_BytesToKey/MD5 ────────────────────
-// Kept ONLY for decrypting existing blocks. New encryptions always use v2.
+// Kept ONLY for decrypting existing blocks. Every encryption uses v2.
 
 function legacyDecrypt(ciphertext: string, password: string): string | null {
   try {
@@ -14,12 +14,6 @@ function legacyDecrypt(ciphertext: string, password: string): string | null {
   } catch {
     return null
   }
-}
-
-/** Sync legacy encrypt — used ONLY for the useEffect unmount cleanup where
- *  async is impossible. The block will be re-encrypted with v2 on next blur. */
-function legacyEncrypt(text: string, password: string): string {
-  return CryptoJS.AES.encrypt(text, password).toString()
 }
 
 // ─── V2 — PBKDF2-SHA256 (600 000 iterations) + AES-256-GCM ─────────────────
@@ -109,14 +103,6 @@ export function isEncryptedBlock(content: string): boolean {
 /** Encrypt a block — async, always uses v2 (PBKDF2 + AES-256-GCM). */
 export async function encryptBlock(content: string, password: string): Promise<string> {
   const inner = await encryptV2(content, password)
-  return `{{encrypt:${inner}}}`
-}
-
-/** Encrypt a block — sync, legacy CryptoJS.
- *  Used ONLY for the React useEffect cleanup on unmount (where async is impossible).
- *  The block will be re-encrypted with v2 on the next blur/unlock cycle. */
-export function encryptBlockSync(content: string, password: string): string {
-  const inner = legacyEncrypt(content, password)
   return `{{encrypt:${inner}}}`
 }
 

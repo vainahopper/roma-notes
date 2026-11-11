@@ -4,6 +4,7 @@ const fs = require('fs')
 const os = require('os')
 const https = require('https')
 const { execSync, exec, execFile } = require('child_process')
+const { createICloudSync, sanitizeFilename } = require('./icloud-sync')
 
 const isDev = process.env.NODE_ENV === 'development'
 
@@ -27,182 +28,17 @@ function ensureDirectories() {
   } catch {}
 }
 
-// ─── iCloud Sync Helpers ─────────────────────────────────────────────────────
+// ─── iCloud Sync ─────────────────────────────────────────────────────────────
+// The engine lives in ./icloud-sync.js (no electron import) so its file-deleting
+// paths can be tested directly — see scripts/test-icloud-sync.js.
 
-function isICloudAvailable() {
-  try {
-    const parent = path.join(os.homedir(), 'Library', 'Mobile Documents', 'iCloud~com~codevainas~romanotes')
-    // If we can create or see the container folder, iCloud Drive is working
-    if (!fs.existsSync(parent)) fs.mkdirSync(parent, { recursive: true })
-    return true
-  } catch {
-    return false
-  }
-}
-
-/** Mirror a page to iCloud (non-blocking, best-effort). */
-function syncPageToICloud(page) {
-  try {
-    if (!fs.existsSync(ICLOUD_CONTAINER)) fs.mkdirSync(ICLOUD_CONTAINER, { recursive: true })
-    const filePath = path.join(ICLOUD_CONTAINER, `${sanitizeFilename(page.id)}.json`)
-    fs.writeFileSync(filePath, JSON.stringify(page, null, 2))
-  } catch (err) {
-    console.error('iCloud sync write failed:', err.message)
-  }
-}
-
-/** Delete a page from iCloud (non-blocking, best-effort). */
-function deletePageFromICloud(id) {
-  try {
-    const filePath = path.join(ICLOUD_CONTAINER, `${sanitizeFilename(id)}.json`)
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath)
-  } catch (err) {
-    console.error('iCloud sync delete failed:', err.message)
-  }
-}
-
-/** Returns true if a page has at least one block with non-empty text content. */
-function pageHasRealContent(page) {
-  function check(blocks) {
-    if (!Array.isArray(blocks)) return false
-    return blocks.some(b => (b.content && b.content.trim()) || check(b.children))
-  }
-  return check(page.blocks)
-}
-
-// ─── Page merge (block-level, by id) ─────────────────────────────────────────
-// Prevents data loss when Mac and iPhone edit the same page concurrently.
-// Without this, the device that pushes last would replace the other's whole
-// page (last-write-wins on the page). With this merge:
-//   - blocks present on both sides: take the per-block newer `updatedAt`
-//   - blocks present only on one side: kept (appended after the newer side's blocks)
-//   - children merged recursively
-// Trade-off: there are no tombstones, so a block deleted on one device may
-// resurrect from the other device's older copy. For a personal notes app,
-// resurrecting a block is preferable to silently losing real edits.
-
-function blockIdSet(blocks) {
-  const out = new Set()
-  function walk(arr) {
-    for (const b of arr || []) {
-      out.add(b.id)
-      if (b.children?.length) walk(b.children)
-    }
-  }
-  walk(blocks)
-  return out
-}
-
-function mergeBlock(a, b) {
-  const aTs = a.updatedAt || ''
-  const bTs = b.updatedAt || ''
-  const winner = aTs >= bTs ? a : b
-  const loser  = aTs >= bTs ? b : a
-  return {
-    ...winner,
-    children: mergeBlockLists(winner.children || [], loser.children || []),
-  }
-}
-
-function mergeBlockLists(newer, older) {
-  const olderMap = new Map()
-  for (const b of older || []) olderMap.set(b.id, b)
-  const seen = new Set()
-  const out = []
-  for (const b of newer || []) {
-    seen.add(b.id)
-    const o = olderMap.get(b.id)
-    out.push(o ? mergeBlock(b, o) : b)
-  }
-  for (const b of older || []) {
-    if (!seen.has(b.id)) out.push(b)
-  }
-  return out
-}
-
-function mergePages(cloudPage, localPage) {
-  const cloudNewer = (cloudPage.updatedAt || '') >= (localPage.updatedAt || '')
-  const newer = cloudNewer ? cloudPage : localPage
-  const older = cloudNewer ? localPage : cloudPage
-  return {
-    ...newer,
-    blocks: mergeBlockLists(newer.blocks || [], older.blocks || []),
-    updatedAt: new Date().toISOString(), // bump so the merged version supersedes both sides
-  }
-}
-
-/** Pull all pages from iCloud and merge with local. Returns pages that were newer in iCloud. */
-async function pullFromICloud() {
-  const merged = []
-  try {
-    if (!fs.existsSync(ICLOUD_CONTAINER)) return merged
-    const cloudFiles = (await fs.promises.readdir(ICLOUD_CONTAINER)).filter(f => f.endsWith('.json'))
-    for (const file of cloudFiles) {
-      try {
-        const cloudPage = JSON.parse(await fs.promises.readFile(path.join(ICLOUD_CONTAINER, file), 'utf-8'))
-        if (!cloudPage.id) continue
-        const localPath = path.join(PAGES_DIR, `${sanitizeFilename(cloudPage.id)}.json`)
-        if (fs.existsSync(localPath)) {
-          const localPage = JSON.parse(await fs.promises.readFile(localPath, 'utf-8'))
-          const cloudHasContent = pageHasRealContent(cloudPage)
-          const localHasContent = pageHasRealContent(localPage)
-
-          // Empty-stub protection (kept from the prior implementation): a stub must
-          // never overwrite real content. Stubs come from a device opening a daily
-          // note before sync has completed.
-          if (cloudHasContent && !localHasContent) {
-            // Cloud has data, local is empty → accept cloud regardless of timestamp
-            await fs.promises.writeFile(localPath, JSON.stringify(cloudPage, null, 2))
-            merged.push(cloudPage)
-          } else if (!cloudHasContent && localHasContent) {
-            // Cloud is empty, local has data → push local to cloud regardless of timestamp
-            console.log(`iCloud sync: keeping real local content for ${cloudPage.id} (cloud stub discarded)`)
-            syncPageToICloud(localPage)
-          } else if (cloudHasContent && localHasContent) {
-            // Both sides have content. If the block sets differ, this is a concurrent
-            // edit (e.g. Mac wrote A,B while iPhone wrote C) → merge by block id so
-            // nothing is lost. If the block sets are identical, fall back to
-            // last-write-wins on the page (cheap path, no ping-pong).
-            const cloudIds = blockIdSet(cloudPage.blocks)
-            const localIds = blockIdSet(localPage.blocks)
-            const sameSet = cloudIds.size === localIds.size && [...cloudIds].every(id => localIds.has(id))
-            if (!sameSet) {
-              const mergedPage = mergePages(cloudPage, localPage)
-              console.log(`iCloud sync: merging concurrent edits for ${cloudPage.id} (cloud=${cloudIds.size} local=${localIds.size} merged=${mergedPage.blocks.length})`)
-              await fs.promises.writeFile(localPath, JSON.stringify(mergedPage, null, 2))
-              syncPageToICloud(mergedPage)
-              merged.push(mergedPage)
-            } else if (cloudPage.updatedAt > localPage.updatedAt) {
-              await fs.promises.writeFile(localPath, JSON.stringify(cloudPage, null, 2))
-              merged.push(cloudPage)
-            } else if (localPage.updatedAt > cloudPage.updatedAt) {
-              syncPageToICloud(localPage)
-            }
-          }
-          // else: both empty → no-op
-        } else {
-          // New page from cloud → save locally (always accept, nothing to lose)
-          await fs.promises.writeFile(localPath, JSON.stringify(cloudPage, null, 2))
-          merged.push(cloudPage)
-        }
-      } catch {}
-    }
-    // Also push local pages that don't exist in cloud
-    const localFiles = (await fs.promises.readdir(PAGES_DIR)).filter(f => f.endsWith('.json'))
-    for (const file of localFiles) {
-      const cloudPath = path.join(ICLOUD_CONTAINER, file)
-      if (!fs.existsSync(cloudPath)) {
-        try {
-          const localPage = JSON.parse(await fs.promises.readFile(path.join(PAGES_DIR, file), 'utf-8'))
-          syncPageToICloud(localPage)
-        } catch {}
-      }
-    }
-  } catch (err) {
-    console.error('iCloud pull failed:', err.message)
-  }
-  return merged
-}
+const {
+  isICloudAvailable,
+  syncPageToICloud,
+  deletePageFromICloud,
+  syncCloudFile,
+  pullFromICloud,
+} = createICloudSync({ pagesDir: PAGES_DIR, icloudContainer: ICLOUD_CONTAINER })
 
 // ─── Startup backup ──────────────────────────────────────────────────────────
 // On every launch, copy all pages into backups/<YYYY-MM-DD>/ before the
@@ -247,7 +83,7 @@ function createStartupBackup() {
 //   {
 //     "version": "1.4.0",
 //     "notes": "Bug fixes and improvements",
-//     "dmgPath": "/path/to/Roma Notes.dmg"
+//     "dmgPath": "/path/to/Roma Research.dmg"
 //   }
 //
 // Or set ROMA_UPDATE_URL env to a remote JSON endpoint.
@@ -318,7 +154,7 @@ function checkForUpdates(win, silent = false) {
           dialog.showMessageBox(win, {
             type: 'info',
             title: 'Update Available',
-            message: `Roma Notes ${info.version} is available`,
+            message: `Roma Research ${info.version} is available`,
             detail: info.notes
               ? `What's new:\n${info.notes}\n\nYou have version ${currentVersion}.`
               : `You have version ${currentVersion}.`,
@@ -334,7 +170,7 @@ function checkForUpdates(win, silent = false) {
           dialog.showMessageBox(win, {
             type: 'info',
             title: 'No Updates',
-            message: `Roma Notes ${currentVersion} is up to date.`,
+            message: `Roma Research ${currentVersion} is up to date.`,
             buttons: ['OK'],
           })
         }
@@ -367,7 +203,7 @@ function checkForUpdates(win, silent = false) {
     dialog.showMessageBox(win, {
       type: 'info',
       title: 'No Updates',
-      message: `Roma Notes ${currentVersion} is up to date.`,
+      message: `Roma Research ${currentVersion} is up to date.`,
       detail: 'No new version has been built yet.\n\nWhen you build a new version with "npm run dist", the update will be detected automatically here.',
       buttons: ['OK'],
     })
@@ -411,11 +247,18 @@ function applyUpdate(win, info) {
         const sourceApp = path.join(mountPoint, appName)
         const appIdx = process.execPath.indexOf('.app/')
         const runningApp = appIdx >= 0 ? process.execPath.slice(0, appIdx + 4) : null
-        const destApp = (runningApp && !runningApp.startsWith('/Volumes/'))
-          ? runningApp
-          : path.join('/Applications', appName)
+        // Install next to the running app, under the DMG's .app name. If the app
+        // was renamed (e.g. "Roma Notes.app" → "Roma Research.app"), the old
+        // bundle is removed so only one copy stays in /Applications.
+        const installDir = (runningApp && !runningApp.startsWith('/Volumes/'))
+          ? path.dirname(runningApp)
+          : '/Applications'
+        const destApp = path.join(installDir, appName)
 
         execSync(`rm -rf "${destApp}"`)
+        if (runningApp && runningApp !== destApp && !runningApp.startsWith('/Volumes/')) {
+          execSync(`rm -rf "${runningApp}"`)
+        }
 
         sendProgress('Installing…', 70)
         execSync(`ditto "${sourceApp}" "${destApp}"`)
@@ -434,7 +277,8 @@ function applyUpdate(win, info) {
         sendProgress('Done', 100)
 
         setTimeout(() => {
-          app.relaunch()
+          // Relaunch the freshly installed bundle (its path/executable name may differ)
+          app.relaunch({ execPath: path.join(destApp, 'Contents', 'MacOS', path.basename(appName, '.app')) })
           app.exit(0)
         }, 800)
       } catch (err) {
@@ -496,7 +340,10 @@ function createWindow() {
     minHeight: 600,
     titleBarStyle: 'hiddenInset',
     vibrancy: 'sidebar',
-    visualEffectState: 'active',
+    // 'followWindow' (the default) lets macOS stop re-sampling the vibrancy blur
+    // when the app isn't frontmost — saves GPU/energy in the background and is the
+    // native look (sidebar dims when unfocused). 'active' forced live blur always.
+    visualEffectState: 'followWindow',
     backgroundColor: '#00000000',
     trafficLightPosition: { x: 16, y: 16 },
     webPreferences: {
@@ -523,50 +370,112 @@ function createWindow() {
     win.loadFile(path.join(__dirname, '../dist/index.html'))
   }
 
+  // Timers/watchers that must be torn down when the window closes, otherwise
+  // they keep firing in a windowless background process and burn energy even
+  // though the user thinks the app is "closed".
+  const startupTimers = []
+  let updateTimer = null
+  let iCloudWatcher = null
+
   // Check for updates silently on startup (after 3 seconds),
   // then keep polling every 10 minutes while the app is open
   if (!isDev) {
-    setTimeout(() => checkForUpdates(win, true), 3000)
-    setInterval(() => checkForUpdates(win, true), 10 * 60 * 1000)
+    startupTimers.push(setTimeout(() => checkForUpdates(win, true), 3000))
+    updateTimer = setInterval(() => checkForUpdates(win, true), 10 * 60 * 1000)
   }
 
-  // iCloud sync: pull on startup (after 2s), then every 30s, and on focus
+  // iCloud sync: pull on startup (after 2s) and on focus. While the window is
+  // focused we poll every 30s. While it's in the background, fs.watch (below)
+  // and the focus handler already deliver iPhone changes, so we drop to a slow
+  // 5-min safety-net poll. This lets macOS idle the app (App Nap) instead of
+  // waking the CPU twice a minute to scan + parse every page — the main source
+  // of this app's energy impact when it just sits open in the background.
+  // Full pull over every page. Guarded so the 30s/focus timers can't stack
+  // overlapping O(all-pages) scans on top of each other (each scan reads +
+  // parses thousands of JSON files and would otherwise pile up under churn).
+  let fullPullInFlight = false
   const doSyncPull = async () => {
-    const merged = await pullFromICloud()
-    if (merged.length > 0) {
-      try { win.webContents.send('sync:updated') } catch {}
+    if (fullPullInFlight) return
+    fullPullInFlight = true
+    try {
+      const merged = await pullFromICloud()
+      if (merged.length > 0) {
+        try { win.webContents.send('sync:updated') } catch {}
+      }
+    } finally {
+      fullPullInFlight = false
     }
   }
-  setTimeout(doSyncPull, 2000)
-  setInterval(doSyncPull, 30 * 1000)
-  win.on('focus', doSyncPull)
+  let syncTimer = null
+  const FOCUSED_SYNC_MS = 30 * 1000
+  const BACKGROUND_SYNC_MS = 5 * 60 * 1000
+  const rescheduleSync = () => {
+    if (syncTimer) clearInterval(syncTimer)
+    syncTimer = setInterval(doSyncPull, win.isFocused() ? FOCUSED_SYNC_MS : BACKGROUND_SYNC_MS)
+  }
+  startupTimers.push(setTimeout(() => { doSyncPull(); rescheduleSync() }, 2000))
+  win.on('focus', () => { doSyncPull(); rescheduleSync() })
+  win.on('blur', rescheduleSync)
 
   // Watch iCloud pages folder for instant detection of iPhone changes.
   // fs.watch fires the moment iCloud downloads a file locally — no polling needed.
+  // CRITICAL for energy: react to ONLY the files that actually changed. iCloud's
+  // background daemon touches individual page files several times a second; the
+  // old handler ran a full pull (re-reading + parsing every page on disk, ~310ms
+  // of CPU) on each event, which pinned the main process near 100% indefinitely.
+  // We coalesce the changed filenames and merge just those — ~0.2ms per file.
   let watchDebounce = null
+  const pendingFiles = new Set()
   const startICloudWatch = () => {
     if (!fs.existsSync(ICLOUD_CONTAINER)) return
     try {
-      fs.watch(ICLOUD_CONTAINER, { persistent: false }, (eventType, filename) => {
+      iCloudWatcher = fs.watch(ICLOUD_CONTAINER, { persistent: false }, (eventType, filename) => {
         if (!filename || !filename.endsWith('.json')) return
+        pendingFiles.add(filename)
         clearTimeout(watchDebounce)
-        watchDebounce = setTimeout(doSyncPull, 400)
+        watchDebounce = setTimeout(async () => {
+          const files = [...pendingFiles]
+          pendingFiles.clear()
+          let changed = 0
+          for (const f of files) {
+            if (await syncCloudFile(f)) changed++
+          }
+          if (changed > 0) {
+            try { win.webContents.send('sync:updated') } catch {}
+          }
+        }, 500)
       })
     } catch {}
   }
   // Start watching after initial pull (gives iCloud time to create the folder)
-  setTimeout(startICloudWatch, 3000)
+  startupTimers.push(setTimeout(startICloudWatch, 3000))
+
+  // Tear down every timer/watcher when the window closes so a backgrounded
+  // process can't keep waking the CPU and the iCloud file watcher.
+  win.on('closed', () => {
+    startupTimers.forEach(clearTimeout)
+    if (updateTimer) clearInterval(updateTimer)
+    if (syncTimer) clearInterval(syncTimer)
+    if (watchDebounce) clearTimeout(watchDebounce)
+    if (iCloudWatcher) { try { iCloudWatcher.close() } catch {} }
+  })
 
   // Set up native menu
   const template = [
     {
-      label: 'Roma Notes',
+      label: 'Roma Research',
       submenu: [
-        { role: 'about', label: 'About Roma Notes' },
+        { role: 'about', label: 'About Roma Research' },
         { type: 'separator' },
         {
           label: 'Check for Updates…',
           click: () => checkForUpdates(win, false),
+        },
+        { type: 'separator' },
+        {
+          label: 'Settings…',
+          accelerator: 'CmdOrCtrl+,',
+          click: () => win.webContents.send('menu:settings'),
         },
         { type: 'separator' },
         { role: 'services' },
@@ -618,6 +527,14 @@ function createWindow() {
           accelerator: 'CmdOrCtrl+K',
           click: () => win.webContents.send('menu:search'),
         },
+        {
+          label: 'All Pages',
+          click: () => win.webContents.send('menu:all-pages'),
+        },
+        {
+          label: 'Graph Overview',
+          click: () => win.webContents.send('menu:graph'),
+        },
         { type: 'separator' },
         { role: 'toggleDevTools' },
         { role: 'resetZoom' },
@@ -664,6 +581,7 @@ ipcMain.on('update:install', () => {
 })
 
 app.whenReady().then(() => {
+  app.setAboutPanelOptions({ applicationName: 'Roma Research', applicationVersion: app.getVersion() })
   ensureDirectories()
   createStartupBackup()
   createWindow()
@@ -674,7 +592,12 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit()
+  // Quit fully on every platform — including macOS. The standard mac pattern is
+  // to keep the app resident after the last window closes, but this app has no
+  // tray UI and runs background timers + an fs.watch, so a "closed" window left a
+  // windowless process burning energy. Closing the window now ends the process;
+  // the dock icon relaunches it (and `activate` recreates the window).
+  app.quit()
 })
 
 // ─── IPC Handlers ───────────────────────────────────────────────────────────
@@ -814,10 +737,6 @@ ipcMain.handle('sync:available', () => {
   return isICloudAvailable()
 })
 
-function sanitizeFilename(name) {
-  return name.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').substring(0, 200)
-}
-
 // ─── Touch ID + Secure Key Storage ──────────────────────────────────────────
 
 const KEYS_FILE = path.join(DATA_DIR, 'block-keys.json')
@@ -861,7 +780,7 @@ ipcMain.handle('auth:promptTouchId', (_, reason) => {
   return new Promise((resolve) => {
     const bin = getTouchIdBinaryPath()
     if (!fs.existsSync(bin)) { resolve({ success: false, error: 'binary not found' }); return }
-    const msg = reason || 'Unlock encrypted block in Roma Notes'
+    const msg = reason || 'Unlock encrypted block in Roma Research'
     execFile(bin, [msg], { timeout: 30000 }, (err, stdout) => {
       const out = stdout.trim()
       if (out === 'success') {
@@ -934,4 +853,21 @@ ipcMain.handle('auth:deleteKey', (_, blockId) => {
   delete keys[blockId]
   saveKeys(keys)
   return true
+})
+
+// Block passwords are stored per block, but most blocks share a password.
+// These let Touch ID unlock a block this device has never unlocked before,
+// as long as its password is already known from another block.
+const usableKeyEntry = (e) => typeof e === 'string' || (e && e.v === 2)
+
+ipcMain.handle('auth:hasAnyKey', () => Object.values(loadKeys()).some(usableKeyEntry))
+
+ipcMain.handle('auth:getAllKeys', () => {
+  if (!safeStorage.isEncryptionAvailable()) return []
+  const out = new Set()
+  for (const e of Object.values(loadKeys())) {
+    if (!usableKeyEntry(e)) continue
+    try { out.add(safeStorage.decryptString(Buffer.from(typeof e === 'string' ? e : e.data, 'hex'))) } catch {}
+  }
+  return [...out]
 })

@@ -1,9 +1,9 @@
-import React, { useEffect, useRef, useCallback, useState, useMemo } from 'react'
+import React, { useEffect, useLayoutEffect, useRef, useCallback, useState, useMemo } from 'react'
 import type { Page, Block } from '../../shared/types'
 import { BlockEditor } from './BlockEditor'
 import { LinkedReferences } from './LinkedReferences'
 import { savePage, getOrCreateDailyPage, createNewPage } from '../stores/useStore'
-import { generateId, dateToPageId, dateToPageTitle, parseDatePage, findBlocksWithLink } from '../utils/helpers'
+import { generateId, dateToPageId, dateToPageTitle, parseDatePage, findBlocksWithLink, spliceSubtreeIntoPage } from '../utils/helpers'
 
 // Sort backlink pages: daily notes by actual date, others by updatedAt. Newest first.
 function sortByPageDate(a: { page: Page }, b: { page: Page }): number {
@@ -14,7 +14,7 @@ function sortByPageDate(a: { page: Page }, b: { page: Page }): number {
   if (db) return 1
   return new Date(b.page.updatedAt).getTime() - new Date(a.page.updatedAt).getTime()
 }
-import { subDays, format } from 'date-fns'
+import { subDays, format, differenceInCalendarDays } from 'date-fns'
 import './DailyNotesView.css'
 
 interface Props {
@@ -30,7 +30,17 @@ const DAYS_TO_LOAD = 7
 const DAYS_EXTRA = 5
 
 export function DailyNotesView({ allPages, pagesVersion, onNavigate, onOpenSidebar, onZoomToBlock, scrollToDate }: Props) {
+  // The feed is a window of days, as offsets from today (0 = today, 1 = yesterday).
+  // newestDayOffset > 0 when the feed was opened on an older day: newer days
+  // are then loaded on demand as the user scrolls up.
+  const [newestDayOffset, setNewestDayOffset] = useState(0)
   const [oldestDayOffset, setOldestDayOffset] = useState(DAYS_TO_LOAD - 1)
+  const newestRef = useRef(newestDayOffset)
+  newestRef.current = newestDayOffset
+  const oldestRef = useRef(oldestDayOffset)
+  oldestRef.current = oldestDayOffset
+  // scrollHeight before prepending newer days, so the view doesn't jump
+  const prependFromHeightRef = useRef<number | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const loadingMoreRef = useRef(false)
   const lastScrollToRef = useRef<string | null | undefined>(undefined)
@@ -40,7 +50,7 @@ export function DailyNotesView({ allPages, pagesVersion, onNavigate, onOpenSideb
   const todayId = dateToPageId(today)
 
   const dates: Date[] = []
-  for (let i = 0; i <= oldestDayOffset; i++) {
+  for (let i = newestDayOffset; i <= oldestDayOffset; i++) {
     dates.push(subDays(today, i))
   }
 
@@ -53,7 +63,16 @@ export function DailyNotesView({ allPages, pagesVersion, onNavigate, onOpenSideb
       }
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [oldestDayOffset, allPages])
+  }, [newestDayOffset, oldestDayOffset, allPages])
+
+  // Keep the visible content in place after newer days are prepended above it
+  useLayoutEffect(() => {
+    const container = containerRef.current
+    const fromHeight = prependFromHeightRef.current
+    if (!container || fromHeight === null) return
+    prependFromHeightRef.current = null
+    container.scrollTop += container.scrollHeight - fromHeight
+  }, [newestDayOffset])
 
   // Always scroll to top on mount (today is at top)
   useEffect(() => {
@@ -65,20 +84,38 @@ export function DailyNotesView({ allPages, pagesVersion, onNavigate, onOpenSideb
   useEffect(() => {
     if (scrollToDate === lastScrollToRef.current) return
     if (!scrollToDate) return
-    lastScrollToRef.current = scrollToDate
+
+    const targetDate = scrollToDate === todayId ? today : parseDatePage(scrollToDate)
+    if (targetDate) {
+      // Never extend the feed into the future: today stays at the top
+      const offset = Math.max(0, differenceInCalendarDays(today, targetDate))
+      if (offset < newestRef.current || offset > oldestRef.current) {
+        // Open the window a few days above the target so there's room to scroll up
+        setNewestDayOffset(offset <= DAYS_TO_LOAD ? 0 : offset - 3)
+        setOldestDayOffset(prev => Math.max(prev, offset + DAYS_TO_LOAD))
+        // Don't let the jump itself trigger top/bottom loading
+        loadingMoreRef.current = true
+        setTimeout(() => { loadingMoreRef.current = false }, 400)
+      }
+    }
 
     const timer = setTimeout(() => {
       const container = containerRef.current
       if (!container) return
+      // Mark handled only once the scroll actually runs (StrictMode re-runs
+      // effects and cancels the first timer).
+      lastScrollToRef.current = scrollToDate
 
-      if (scrollToDate === todayId) {
+      if (scrollToDate === todayId && newestRef.current <= 0) {
         container.scrollTo({ top: 0, behavior: 'smooth' })
         return
       }
 
       const el = document.getElementById(`daily-${scrollToDate}`)
       if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        // Instant jump when the window doesn't start at today: a smooth scroll
+        // would pass through the top edge and trigger loading newer days.
+        el.scrollIntoView({ behavior: newestRef.current > 0 ? 'auto' : 'smooth', block: 'start' })
       } else {
         container.scrollTo({ top: 0, behavior: 'smooth' })
       }
@@ -92,8 +129,17 @@ export function DailyNotesView({ allPages, pagesVersion, onNavigate, onOpenSideb
     const container = containerRef.current
     if (!container) return
 
-    // Show FAB when user has scrolled past first screenful
-    setShowFab(container.scrollTop > 400)
+    // Show FAB when user has scrolled past first screenful, or isn't on today's window
+    setShowFab(container.scrollTop > 400 || newestRef.current > 0)
+
+    // Near the top of a window that starts before today → load newer days
+    if (!loadingMoreRef.current && newestRef.current > 0 && container.scrollTop < 300) {
+      loadingMoreRef.current = true
+      prependFromHeightRef.current = container.scrollHeight
+      setNewestDayOffset(prev => Math.max(0, prev - DAYS_EXTRA))
+      setTimeout(() => { loadingMoreRef.current = false }, 200)
+      return
+    }
 
     // Near the bottom → load older days
     if (!loadingMoreRef.current) {
@@ -116,14 +162,18 @@ export function DailyNotesView({ allPages, pagesVersion, onNavigate, onOpenSideb
   }, [handleScroll])
 
   const scrollToTop = useCallback(() => {
+    if (newestRef.current > 0) {
+      // Jump back to a window that starts at today
+      setNewestDayOffset(0)
+      requestAnimationFrame(() => { if (containerRef.current) containerRef.current.scrollTop = 0 })
+      setShowFab(false)
+      return
+    }
     containerRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
   }, [])
 
   return (
     <div className="daily-notes-view" ref={containerRef}>
-      <div className="daily-notes-header">
-        <h1 className="daily-notes-title">Daily Notes</h1>
-      </div>
       <div className="daily-notes-list">
         {dates.map(date => {
           const id = dateToPageId(date)
@@ -229,11 +279,11 @@ function DayEntry({ page, allPages, pagesVersion, onNavigate, onOpenSidebar, onZ
   const backlinks = useMemo(() => {
     const pageTitleLower = page.title.toLowerCase()
     const pageIdLower = page.id.toLowerCase()
-    const results: { page: Page; blocks: Block[] }[] = []
+    const results: { page: Page; matches: ReturnType<typeof findBlocksWithLink> }[] = []
     for (const [, p] of allPages) {
       if (p.id === page.id) continue
-      const matching = findBlocksWithLink(p.blocks, pageTitleLower, pageIdLower)
-      if (matching.length > 0) results.push({ page: p, blocks: matching })
+      const matches = findBlocksWithLink(p.blocks, pageTitleLower, pageIdLower)
+      if (matches.length > 0) results.push({ page: p, matches })
     }
     return results.sort(sortByPageDate)
   }, [page.id, page.title, allPages, pagesVersion])
@@ -281,15 +331,10 @@ function DayEntry({ page, allPages, pagesVersion, onNavigate, onOpenSidebar, onZ
     savePage({ ...target, blocks: updateBlock(target.blocks) })
   }, [allPages])
 
-  const handleEditBlock = useCallback((pageId: string, blockId: string, content: string) => {
+  const handleSaveRefSubtree = useCallback((pageId: string, matchBlockId: string, editedSubtree: Block[]) => {
     const target = allPages.get(pageId)
     if (!target) return
-    function update(bs: Block[]): Block[] {
-      return bs.map(b => b.id === blockId
-        ? { ...b, content, updatedAt: new Date().toISOString() }
-        : { ...b, children: update(b.children) })
-    }
-    savePage({ ...target, blocks: update(target.blocks) })
+    savePage({ ...target, blocks: spliceSubtreeIntoPage(target.blocks, matchBlockId, editedSubtree), updatedAt: new Date().toISOString() })
   }, [allPages])
 
   const date = parseDatePage(page.id)
@@ -330,7 +375,7 @@ function DayEntry({ page, allPages, pagesVersion, onNavigate, onOpenSidebar, onZ
             onNavigateToBlock={onZoomToBlock}
             onToggleBlock={handleToggleTodo}
             onToggleTodoMarker={handleToggleTodoMarker}
-            onEditBlock={handleEditBlock}
+            onSaveRefSubtree={handleSaveRefSubtree}
             title="Linked References"
           />
         </div>

@@ -1,13 +1,15 @@
-import React, { useState, useCallback, useMemo, useRef, Fragment } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef, Fragment } from 'react'
 import type { Page, Block, ZoomFrame } from '../../shared/types'
 import { BlockEditor } from './BlockEditor'
 import { BlockContent } from './BlockContent'
 import { LinkedReferences } from './LinkedReferences'
 import { savePage, deletePage, createNewPage, useStore } from '../stores/useStore'
-import { isDatePage, parseDatePage, findBlocksWithLink, extractAttributes } from '../utils/helpers'
+import { isDatePage, parseDatePage, findBlocksWithLink, extractAttributes, spliceSubtreeIntoPage, type BlockMatch } from '../utils/helpers'
 
 // Sort pages so daily notes appear in chronological order (by their actual date),
 // and regular pages sort by createdAt.  Newest first.
+interface Backlink { page: Page; matches: BlockMatch[] }
+
 function sortByPageDate(a: { page: Page }, b: { page: Page }): number {
   const da = parseDatePage(a.page.id)
   const db = parseDatePage(b.page.id)
@@ -30,13 +32,17 @@ interface Props {
   onNavigateToBlock?: (pageId: string, pageTitle: string, blockId: string) => void
   onToggleStar?: () => void
   initialZoom?: ZoomFrame[] | null
+  /** Day pages only: open the Daily Notes feed scrolled to this day */
+  onShowInDailyNotes?: (pageId: string) => void
+  /** Called when the user zooms in/out inside the page, so it can become a history entry */
+  onZoomChange?: (stack: ZoomFrame[]) => void
 }
 
 // Pages whose title triggers special linked-refs treatment
 const TODO_PAGE_TITLES = ['todo', 'todos', 'tasks']
 const DONE_PAGE_TITLES = ['done']
 
-export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDeleted, isSidebar = false, scrollToBlockId, onClearScrollTarget, onNavigateToBlock, onToggleStar, initialZoom }: Props) {
+export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDeleted, isSidebar = false, scrollToBlockId, onClearScrollTarget, onNavigateToBlock, onToggleStar, initialZoom, onShowInDailyNotes, onZoomChange }: Props) {
   const { pagesVersion } = useStore()
   const [blocks, setBlocks] = useState<Block[]>(page.blocks)
   const [title, setTitle] = useState(page.title)
@@ -51,17 +57,30 @@ export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDele
   const [zoomStack, setZoomStack] = useState<ZoomFrame[]>(initialZoom ?? [])
   const zoomedBlockId = zoomStack.length > 0 ? zoomStack[zoomStack.length - 1].blockId : null
 
+  // Back/forward hands us a different zoom for the same page — follow it
+  const initialZoomKey = initialZoom?.map(f => f.blockId).join('>') ?? ''
+  useEffect(() => {
+    setZoomStack(initialZoom ?? [])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialZoomKey])
+
   const handleZoom = useCallback((blockId: string, blockContent: string) => {
-    setZoomStack(prev => [...prev, { blockId, blockContent }])
-  }, [])
+    const next = [...zoomStack, { blockId, blockContent }]
+    setZoomStack(next)
+    onZoomChange?.(next)
+  }, [zoomStack, onZoomChange])
 
   const handleBreadcrumbNav = useCallback((index: number) => {
-    if (index < 0) setZoomStack([])
-    else setZoomStack(prev => prev.slice(0, index + 1))
-  }, [])
+    const next = index < 0 ? [] : zoomStack.slice(0, index + 1)
+    setZoomStack(next)
+    onZoomChange?.(next)
+  }, [zoomStack, onZoomChange])
 
 
   const isDaily = page.isDaily || isDatePage(page.title)
+  // Future days aren't part of the Daily Notes feed (it starts at today)
+  const dayDate = isDaily ? parseDatePage(page.id) ?? parseDatePage(page.title) : null
+  const isFutureDay = !!dayDate && dayDate.getTime() > new Date().setHours(23, 59, 59, 999)
   const isTodoPage = TODO_PAGE_TITLES.includes(page.title.toLowerCase())
   const isDonePage = DONE_PAGE_TITLES.includes(page.title.toLowerCase())
 
@@ -154,27 +173,42 @@ export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDele
     savePage({ ...targetPage, blocks: updateBlock(targetPage.blocks) })
   }, [allPages])
 
-  const handleEditBacklinkBlock = useCallback((pageId: string, blockId: string, content: string) => {
+  const handleSaveRefSubtree = useCallback((pageId: string, matchBlockId: string, editedSubtree: Block[]) => {
     const targetPage = allPages.get(pageId)
     if (!targetPage) return
-    function updateBlockContent(blist: Block[]): Block[] {
-      return blist.map(b => {
-        if (b.id === blockId) return { ...b, content, updatedAt: new Date().toISOString() }
-        return { ...b, children: updateBlockContent(b.children) }
+    const newBlocks = spliceSubtreeIntoPage(targetPage.blocks, matchBlockId, editedSubtree)
+    savePage({ ...targetPage, blocks: newBlocks, updatedAt: new Date().toISOString() })
+  }, [allPages])
+
+  // Toggle the checked state of the currently-zoomed TODO block (from the zoom hero)
+  const handleToggleZoomedTodo = useCallback(() => {
+    if (!zoomedBlockId) return
+    function updateBlock(list: Block[]): Block[] {
+      return list.map(b => {
+        if (b.id === zoomedBlockId) {
+          let cur = b.checked
+          if (cur === null || cur === undefined) cur = /\{\{\[\[DONE\]\]\}\}/i.test(b.content)
+          const newContent = b.content
+            .replace(/\{\{\[\[TODO\]\]\}\}|{{TODO}}/gi, '')
+            .replace(/\{\{\[\[DONE\]\]\}\}|{{DONE}}/gi, '')
+            .trim()
+          return { ...b, checked: cur === true ? false : true, content: newContent }
+        }
+        return { ...b, children: updateBlock(b.children) }
       })
     }
-    savePage({ ...targetPage, blocks: updateBlockContent(targetPage.blocks) })
-  }, [allPages])
+    handleBlocksChange(updateBlock(blocks))
+  }, [zoomedBlockId, blocks, handleBlocksChange])
 
   // ── Linked references (explicit [[PageTitle]] wikilinks) ─────────────────────
   const backlinks = useMemo(() => {
     const pageTitleLower = page.title.toLowerCase()
     const pageIdLower = page.id.toLowerCase()
-    const results: { page: Page; blocks: Block[] }[] = []
+    const results: Backlink[] = []
     for (const [, p] of allPages) {
       if (p.id === page.id) continue
-      const matchingBlocks = findBlocksWithLink(p.blocks, pageTitleLower, pageIdLower)
-      if (matchingBlocks.length > 0) results.push({ page: p, blocks: matchingBlocks })
+      const matches = findBlocksWithLink(p.blocks, pageTitleLower, pageIdLower)
+      if (matches.length > 0) results.push({ page: p, matches })
     }
     return results.sort(sortByPageDate)
   }, [page.id, page.title, allPages, pagesVersion])
@@ -182,8 +216,8 @@ export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDele
   // Build a Set of block IDs that are already linked (for filtering unlinked)
   const linkedBlockIds = useMemo(() => {
     const ids = new Set<string>()
-    for (const { blocks: bs } of backlinks) {
-      bs.forEach(b => ids.add(b.id))
+    for (const { matches } of backlinks) {
+      matches.forEach(m => ids.add(m.block.id))
     }
     return ids
   }, [backlinks])
@@ -191,14 +225,13 @@ export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDele
   // ── Unlinked references (plain-text mention, not inside [[…]]) ───────────────
   const unlinkedRefs = useMemo(() => {
     if (!title || title === 'Untitled') return []
-    const results: { page: Page; blocks: Block[] }[] = []
+    const results: Backlink[] = []
     for (const [, p] of allPages) {
       if (p.id === page.id) continue
-      // Exclude blocks already in linked refs
-      const matchingBlocks = findBlocksWithUnlinkedMention(p.blocks, title).filter(
-        b => !linkedBlockIds.has(b.id)
+      const matches = findBlocksWithUnlinkedMention(p.blocks, title).filter(
+        m => !linkedBlockIds.has(m.block.id)
       )
-      if (matchingBlocks.length > 0) results.push({ page: p, blocks: matchingBlocks })
+      if (matches.length > 0) results.push({ page: p, matches })
     }
     return results.sort(sortByPageDate)
   }, [page.id, title, allPages, linkedBlockIds, pagesVersion])
@@ -206,11 +239,11 @@ export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDele
   // ── TODO page: collect all todo blocks across all pages ──────────────────────
   const todoRefs = useMemo(() => {
     if (!isTodoPage) return []
-    const results: { page: Page; blocks: Block[] }[] = []
+    const results: Backlink[] = []
     for (const [, p] of allPages) {
       if (p.id === page.id) continue
-      const todoBlocks = findTodoBlocks(p.blocks)
-      if (todoBlocks.length > 0) results.push({ page: p, blocks: todoBlocks })
+      const matches = findTodoBlocks(p.blocks)
+      if (matches.length > 0) results.push({ page: p, matches })
     }
     return results.sort(sortByPageDate)
   }, [isTodoPage, allPages, page.id, pagesVersion])
@@ -218,11 +251,11 @@ export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDele
   // ── DONE page: collect all done blocks across all pages ───────────────────────
   const doneRefs = useMemo(() => {
     if (!isDonePage) return []
-    const results: { page: Page; blocks: Block[] }[] = []
+    const results: Backlink[] = []
     for (const [, p] of allPages) {
       if (p.id === page.id) continue
-      const doneBlocks = findDoneBlocks(p.blocks)
-      if (doneBlocks.length > 0) results.push({ page: p, blocks: doneBlocks })
+      const matches = findDoneBlocks(p.blocks)
+      if (matches.length > 0) results.push({ page: p, matches })
     }
     return results.sort(sortByPageDate)
   }, [isDonePage, allPages, page.id, pagesVersion])
@@ -232,11 +265,11 @@ export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDele
     const titleEscaped = title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     const regex = new RegExp(`(?<!\\[\\[)${titleEscaped}(?!\\]\\])`, 'gi')
 
-    for (const { page: p, blocks: unlinkedBlocks } of unlinkedRefs) {
+    for (const { page: p, matches: unlinkedMatches } of unlinkedRefs) {
       let changed = false
       function replaceInBlock(b: Block): Block {
         let newContent = b.content
-        if (unlinkedBlocks.some(ub => ub.id === b.id)) {
+        if (unlinkedMatches.some(m => m.block.id === b.id)) {
           newContent = b.content.replace(regex, `[[${title}]]`)
           if (newContent !== b.content) changed = true
         }
@@ -251,6 +284,8 @@ export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDele
 
   return (
     <div className={`page-view ${isSidebar ? 'is-sidebar' : ''}`}>
+      {/* Single scroll region: the whole page scrolls as one unit (Roam-style) */}
+      <div className="page-scroll">
       {/* Breadcrumbs — only shown when zoomed into a block */}
       {zoomStack.length > 0 && (
         <div className="block-breadcrumbs">
@@ -317,26 +352,71 @@ export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDele
             </>
           )}
         </div>
+        {isDaily && !isSidebar && onShowInDailyNotes && !isFutureDay && (
+          <button
+            className="page-daily-feed-link"
+            onClick={() => onShowInDailyNotes(page.id)}
+            title="Show this day in the Daily Notes feed"
+          >
+            <svg width="11" height="11" viewBox="0 0 15 15" fill="none">
+              <rect x="2" y="1" width="11" height="13" rx="1.5" stroke="currentColor" strokeWidth="1.3"/>
+              <line x1="5" y1="5" x2="10" y2="5" stroke="currentColor" strokeWidth="1.2"/>
+              <line x1="5" y1="8" x2="10" y2="8" stroke="currentColor" strokeWidth="1.2"/>
+              <line x1="5" y1="11" x2="8" y2="11" stroke="currentColor" strokeWidth="1.2"/>
+            </svg>
+            View in Daily Notes
+          </button>
+        )}
       </div>
       )}
 
       {/* Zoom hero — block protagonist title (shown instead of page header when zoomed) */}
-      {zoomStack.length > 0 && (
-        <div className="zoom-hero">
-          <div className="zoom-hero-title">
-            <BlockContent
-              content={currentZoomedBlock?.content || zoomStack[zoomStack.length - 1].blockContent || 'Block'}
-              allPages={allPages}
-              onNavigate={onNavigate}
-              onOpenSidebar={onOpenSidebar}
-              onNavigateToBlock={onNavigateToBlock}
-            />
+      {zoomStack.length > 0 && (() => {
+        const heroContent = currentZoomedBlock?.content ?? zoomStack[zoomStack.length - 1].blockContent ?? 'Block'
+        let heroChecked = currentZoomedBlock?.checked
+        if (heroChecked === null || heroChecked === undefined) {
+          if (/\{\{\[\[DONE\]\]\}\}/i.test(heroContent)) heroChecked = true
+          else if (/\{\{\[\[TODO\]\]\}\}/i.test(heroContent)) heroChecked = false
+        }
+        const heroIsTodo = heroChecked !== null && heroChecked !== undefined
+        const heroDisplay = heroIsTodo
+          ? heroContent.replace(/\{\{\[\[TODO\]\]\}\}|\{\{\[\[DONE\]\]\}\}/gi, '').trim()
+          : heroContent
+        return (
+          <div className="zoom-hero">
+            <div className={`zoom-hero-title${heroIsTodo ? ' zoom-hero-todo' : ''}`}>
+              {heroIsTodo && (
+                <button
+                  className={`backlink-checkbox zoom-hero-checkbox${heroChecked ? ' checked' : ''}`}
+                  onClick={handleToggleZoomedTodo}
+                  title={heroChecked ? 'Mark as not done' : 'Mark as done'}
+                >
+                  {heroChecked ? (
+                    <svg width="16" height="16" viewBox="0 0 14 14" fill="none">
+                      <rect x="0.5" y="0.5" width="13" height="13" rx="3" fill="var(--text-muted)" stroke="var(--text-muted)"/>
+                      <path d="M3.5 7L6 9.5L10.5 4.5" stroke="white" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  ) : (
+                    <svg width="16" height="16" viewBox="0 0 14 14" fill="none">
+                      <rect x="0.5" y="0.5" width="13" height="13" rx="3" stroke="var(--border-normal)" strokeWidth="1.5"/>
+                    </svg>
+                  )}
+                </button>
+              )}
+              <BlockContent
+                content={heroDisplay}
+                checked={heroChecked}
+                allPages={allPages}
+                onNavigate={onNavigate}
+                onOpenSidebar={onOpenSidebar}
+                onNavigateToBlock={onNavigateToBlock}
+              />
+            </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
 
-      {/* Scrollable content + references */}
-      <div className="page-scroll">
+      {/* Content + references */}
         <div className="page-content">
           <BlockEditor
             blocks={blocks}
@@ -354,7 +434,7 @@ export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDele
         </div>
 
         {/* TODO page: show all todo blocks */}
-        {isTodoPage && todoRefs.length > 0 && !isSidebar && (
+        {isTodoPage && todoRefs.length > 0 && (
           <LinkedReferences
             backlinks={todoRefs}
             allPages={allPages}
@@ -362,13 +442,14 @@ export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDele
             onNavigateToBlock={onNavigateToBlock}
             onToggleBlock={handleToggleBacklinkTodo}
             onToggleTodoMarker={handleToggleTodoMarker}
-            onEditBlock={handleEditBacklinkBlock}
+            onSaveRefSubtree={handleSaveRefSubtree}
             title="All To-dos"
+            prominentPageTitle
           />
         )}
 
         {/* DONE page: show all done blocks */}
-        {isDonePage && doneRefs.length > 0 && !isSidebar && (
+        {isDonePage && doneRefs.length > 0 && (
           <LinkedReferences
             backlinks={doneRefs}
             allPages={allPages}
@@ -376,13 +457,14 @@ export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDele
             onNavigateToBlock={onNavigateToBlock}
             onToggleBlock={handleToggleBacklinkTodo}
             onToggleTodoMarker={handleToggleTodoMarker}
-            onEditBlock={handleEditBacklinkBlock}
+            onSaveRefSubtree={handleSaveRefSubtree}
             title="All Done"
+            prominentPageTitle
           />
         )}
 
         {/* Linked references */}
-        {backlinks.length > 0 && !isSidebar && (
+        {backlinks.length > 0 && (
           <LinkedReferences
             backlinks={backlinks}
             allPages={allPages}
@@ -390,13 +472,13 @@ export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDele
             onNavigateToBlock={onNavigateToBlock}
             onToggleBlock={handleToggleBacklinkTodo}
             onToggleTodoMarker={handleToggleTodoMarker}
-            onEditBlock={handleEditBacklinkBlock}
+            onSaveRefSubtree={handleSaveRefSubtree}
             title="Linked References"
           />
         )}
 
         {/* Unlinked references */}
-        {unlinkedRefs.length > 0 && !isSidebar && (
+        {unlinkedRefs.length > 0 && (
           <LinkedReferences
             backlinks={unlinkedRefs}
             allPages={allPages}
@@ -404,7 +486,7 @@ export function PageView({ page, allPages, onNavigate, onOpenSidebar, onPageDele
             onNavigateToBlock={onNavigateToBlock}
             onToggleBlock={handleToggleBacklinkTodo}
             onToggleTodoMarker={handleToggleTodoMarker}
-            onEditBlock={handleEditBacklinkBlock}
+            onSaveRefSubtree={handleSaveRefSubtree}
             title="Unlinked References"
             onLinkAll={handleLinkAll}
           />
@@ -462,46 +544,48 @@ function ensureWikilinkPages(blocks: Block[], allPages: Map<string, Page>) {
 }
 
 
-function findBlocksWithUnlinkedMention(blocks: Block[], title: string): Block[] {
-  const results: Block[] = []
+function findBlocksWithUnlinkedMention(blocks: Block[], title: string): BlockMatch[] {
+  const results: BlockMatch[] = []
   const titleLower = title.toLowerCase()
-  function traverse(block: Block) {
+  function traverse(block: Block, parents: Block[]) {
     const contentLower = block.content.toLowerCase()
     if (contentLower.includes(titleLower)) {
-      // Strip all [[...]] wikilinks and #tags from content before checking for plain mention
       const stripped = block.content.replace(/\[\[[^\]]*\]\]/g, '').replace(/#(?:\[\[[^\]]+\]\]|[A-Za-z0-9_À-ÿ-]+)/g, '').toLowerCase()
-      if (stripped.includes(titleLower)) results.push(block)
+      if (stripped.includes(titleLower)) results.push({ block, parents: parents.slice() })
     }
-    block.children.forEach(traverse)
+    const nextParents = [...parents, block]
+    block.children.forEach(c => traverse(c, nextParents))
   }
-  blocks.forEach(traverse)
+  blocks.forEach(b => traverse(b, []))
   return results
 }
 
 const TODO_CONTENT_RE = /\{\{\[\[TODO\]\]\}\}/i
 const DONE_CONTENT_RE = /\{\{\[\[DONE\]\]\}\}/i
 
-function findTodoBlocks(blocks: Block[]): Block[] {
-  const results: Block[] = []
-  function traverse(block: Block) {
+function findTodoBlocks(blocks: Block[]): BlockMatch[] {
+  const results: BlockMatch[] = []
+  function traverse(block: Block, parents: Block[]) {
     const isDone = block.checked === true || DONE_CONTENT_RE.test(block.content)
-    if (isDone) { block.children.forEach(traverse); return }
+    const nextParents = [...parents, block]
+    if (isDone) { block.children.forEach(c => traverse(c, nextParents)); return }
     const hasTodoProp = block.checked !== null && block.checked !== undefined
     const hasTodoContent = TODO_CONTENT_RE.test(block.content)
-    if (hasTodoProp || hasTodoContent) results.push(block)
-    block.children.forEach(traverse)
+    if (hasTodoProp || hasTodoContent) results.push({ block, parents: parents.slice() })
+    block.children.forEach(c => traverse(c, nextParents))
   }
-  blocks.forEach(traverse)
+  blocks.forEach(b => traverse(b, []))
   return results
 }
 
-function findDoneBlocks(blocks: Block[]): Block[] {
-  const results: Block[] = []
-  function traverse(block: Block) {
+function findDoneBlocks(blocks: Block[]): BlockMatch[] {
+  const results: BlockMatch[] = []
+  function traverse(block: Block, parents: Block[]) {
     const isDone = block.checked === true || DONE_CONTENT_RE.test(block.content)
-    if (isDone) results.push(block)
-    block.children.forEach(traverse)
+    if (isDone) results.push({ block, parents: parents.slice() })
+    const nextParents = [...parents, block]
+    block.children.forEach(c => traverse(c, nextParents))
   }
-  blocks.forEach(traverse)
+  blocks.forEach(b => traverse(b, []))
   return results
 }

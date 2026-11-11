@@ -1,4 +1,4 @@
-# Roma Notes — CLAUDE.md
+# Roma Research (formerly Roma Notes) — CLAUDE.md
 
 ## What it is
 Roam Research-inspired note-taking app for macOS + iPhone. Single codebase.
@@ -82,7 +82,7 @@ manually via **Roma Notes > Check for Updates…**.
 `npm run deploy:ios` copies `dist/` to the iCloud container. The iPhone app
 detects the new version 5 seconds after launch and applies it (reloads).
 
-## Current version: 1.8.6
+## Current version: 1.8.25
 
 ## iPhone setup (one-time)
 1. In Xcode: select your Apple Developer Team (Signing & Capabilities)
@@ -116,6 +116,14 @@ detects the new version 5 seconds after launch and applies it (reloads).
 - iPhone reads/writes the same iCloud container via `RomaCloudSyncPlugin`
 - Both sides pull on startup, every 60s, and on app focus/resume
 - Conflict resolution: latest `updatedAt` timestamp wins
+- **Encrypted blocks are device-local**: before any upload (iCloud on Mac/iPhone, Netlify bridge) their ciphertext is replaced by `{{encrypt:local-only}}` (`utils/localOnly.ts`, mirrored in `src/main/icloud-sync.js` and `notes.mts`); on pull the device holding the ciphertext restores it. Other devices show "only on your other device". Unlocked plaintext never reaches the store (`emitChange` in `BlockItem.tsx`)
+
+## Cloud bridge (agent access — Instinct)
+- `cloud/` = Netlify site `roma-research-14a959` (function `notes.mts` + Netlify Blobs). Deploy: `cd cloud && netlify deploy --prod --no-build --dir public --functions netlify/functions`
+- Agent routes `/n/<ROMA_TOKEN>/{today,page,search,recent,add,edit,delete,move,indent,outdent}` (page views show `^blockId` for targeting blocks; encrypted blocks are off-limits; deletes go to a `trash` blob) need an agent password: Basic auth `instinct:<ROMA_AGENT_PASSWORD>` or `grok:<ROMA_GROK_PASSWORD>`; Grok may also pass its password as a `/k/<password>/` path segment or `?key=` (see `AGENTS` in `notes.mts`). Agent writes are logged (last 1000) in the `log` blob (`cd cloud && netlify blobs:get roma log`); app routes `/n/<ROMA_TOKEN>/sync/*` use the path token only
+- Apps (`src/renderer/utils/cloudBridge.ts`) push pages on save, catch up against `/sync/index`, and merge the agent's inbox (adds) and then `ops` queue (edits/deletes/moves, replayed by `utils/cloudOps.ts`) into local pages after iCloud pull. Move ops are only served to clients that fetch `/sync/ops?v=2` (older builds would ack them unapplied). Server never lets an empty page overwrite one with content
+- `python3 scripts/export-markdown.py` → `exports/roma-todo.md` + zip (full history with dates, for agent context; gitignored)
+- Build needs `VITE_ROMA_CLOUD_URL` in `.env.local` (gitignored); token/password copies in `cloud/.netlify/`
 
 ## Roam-compatible syntax
 `[[wikilinks]]`, `#tags`, `#[[multi word]]`, `{{[[TODO]]}}` / `{{[[DONE]]}}`, `**bold**`, `__italic__`, `^^highlight^^`, `` `code` ``, `Key:: value`, `{{encrypt:BASE64}}`

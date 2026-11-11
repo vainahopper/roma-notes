@@ -1,7 +1,7 @@
 import React, { useCallback, useRef, useEffect } from 'react'
 import type { Block, Page } from '../../shared/types'
 import { BlockItem } from './BlockItem'
-import { generateId } from '../utils/helpers'
+import { generateId, blocksToHtmlList } from '../utils/helpers'
 import { platform } from '../platform'
 import './BlockEditor.css'
 
@@ -205,6 +205,31 @@ function _selectedBlockIds(container: HTMLElement, range: Range): string[] {
   return ids
 }
 
+// Robust block detection for a DOM selection: walk up from the range's start/end
+// nodes to their owning block, then take every block element in document order
+// between them (inclusive). Avoids the boundary-point math, which misses blocks
+// for selections that start/end at element edges. Returns ids in document order.
+function _blockIdsInRange(container: HTMLElement, range: Range): string[] {
+  const blockOf = (node: Node | null): HTMLElement | null => {
+    const el = node && node.nodeType === Node.ELEMENT_NODE
+      ? (node as HTMLElement)
+      : node?.parentElement ?? null
+    return el ? el.closest<HTMLElement>('[data-block-id]') : null
+  }
+  const startEl = blockOf(range.startContainer)
+  const endEl = blockOf(range.endContainer)
+  if (!startEl || !endEl) return []
+  const all = Array.from(container.querySelectorAll<HTMLElement>('[data-block-id]'))
+  let i1 = all.indexOf(startEl)
+  let i2 = all.indexOf(endEl)
+  if (i1 < 0 || i2 < 0) return []
+  if (i1 > i2) [i1, i2] = [i2, i1]
+  return all
+    .slice(i1, i2 + 1)
+    .map(el => el.getAttribute('data-block-id'))
+    .filter((id): id is string => !!id)
+}
+
 interface Props {
   blocks: Block[]
   onChange: (blocks: Block[]) => void
@@ -217,10 +242,12 @@ interface Props {
   onZoom?: (id: string, content: string) => void
   onNavigateToBlock?: (pageId: string, pageTitle: string, blockId: string) => void
   onBlur?: () => void
+  /** When set, this block enters edit mode (cursor at end) on first mount. */
+  initialFocusBlockId?: string
 }
 
-export function BlockEditor({ blocks, onChange, allPages, onNavigate, onOpenSidebar, scrollToBlockId, onClearScrollTarget, zoomedBlockId, onZoom, onNavigateToBlock, onBlur }: Props) {
-  const focusIdRef = useRef<string | null>(null)
+export function BlockEditor({ blocks, onChange, allPages, onNavigate, onOpenSidebar, scrollToBlockId, onClearScrollTarget, zoomedBlockId, onZoom, onNavigateToBlock, onBlur, initialFocusBlockId }: Props) {
+  const focusIdRef = useRef<string | null>(initialFocusBlockId ?? null)
   const editorRef = useRef<HTMLDivElement>(null)
   const dragGhostRef = useRef<HTMLDivElement>(null)
   const dropIndicatorRef = useRef<HTMLDivElement>(null)
@@ -878,9 +905,11 @@ export function BlockEditor({ blocks, onChange, allPages, onNavigate, onOpenSide
         const depthMap = _buildDepthMap(blocksRef.current, 0)
         const minDepth = Math.min(...ids.map(id => depthMap.get(id) ?? 0))
         const lines: string[] = []
+        const roots: Block[] = []
         for (const id of ids) {
           const blk = _findBlock(id, blocksRef.current)
           if (!blk) continue
+          roots.push(blk)
           const addSubtree = (b: Block, depth: number) => {
             lines.push(`${'    '.repeat(depth)}- ${b.content}`)
             for (const child of b.children) addSubtree(child, depth + 1)
@@ -890,6 +919,7 @@ export function BlockEditor({ blocks, onChange, allPages, onNavigate, onOpenSide
         if (lines.length > 0) {
           e.preventDefault()
           e.clipboardData?.setData('text/plain', lines.join('\n'))
+          e.clipboardData?.setData('text/html', blocksToHtmlList(roots))
         }
         return
       }
@@ -901,8 +931,13 @@ export function BlockEditor({ blocks, onChange, allPages, onNavigate, onOpenSide
       if (!anchor || !container.contains(anchor)) return
 
       const range = sel.getRangeAt(0)
-      const rawIds2 = _selectedBlockIds(container, range)
-      if (rawIds2.length === 0) return
+      // Robust ancestor-based detection (boundary-point math misses edge cases).
+      // Fall back to the legacy overlap check if needed.
+      let rawIds2 = _blockIdsInRange(container, range)
+      if (rawIds2.length === 0) rawIds2 = _selectedBlockIds(container, range)
+      // Single block spanned → let the native copy handle the fragment (chrome is
+      // excluded via user-select:none); only take over for multi-block selections.
+      if (rawIds2.length < 2) return
       // Filter roots to avoid double-counting nested blocks
       const ids2 = _filterRoots(rawIds2, blocksRef.current)
 
@@ -912,9 +947,11 @@ export function BlockEditor({ blocks, onChange, allPages, onNavigate, onOpenSide
       const depthMap = _buildDepthMap(blocksRef.current, 0)
       const minDepth = Math.min(...ids2.map(id => depthMap.get(id) ?? 0))
       const lines: string[] = []
+      const roots: Block[] = []
       for (const id of ids2) {
         const block = _findBlock(id, blocksRef.current)
         if (!block) continue
+        roots.push(block)
         const baseIndent = (depthMap.get(id) ?? 0) - minDepth
         const addSubtree = (b: Block, depth: number) => {
           lines.push(`${'    '.repeat(depth)}- ${b.content}`)
@@ -925,6 +962,7 @@ export function BlockEditor({ blocks, onChange, allPages, onNavigate, onOpenSide
 
       if (lines.length === 0) return
       e.clipboardData?.setData('text/plain', lines.join('\n'))
+      e.clipboardData?.setData('text/html', blocksToHtmlList(roots))
     }
 
     document.addEventListener('copy', handler)

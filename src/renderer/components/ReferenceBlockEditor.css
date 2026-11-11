@@ -1,0 +1,8 @@
+.reference-block-editor {
+  /* The scoped BlockEditor renders its own .block-editor inside. Keep it flush
+     with the reference row — no extra indent, no min-height jump. */
+  width: 100%;
+}
+.reference-block-editor .block-editor {
+  padding: 0;
+}
