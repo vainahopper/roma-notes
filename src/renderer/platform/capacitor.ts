@@ -2,6 +2,7 @@ import type { PlatformAdapter } from './adapter'
 import type { Page, PageMeta, AppSettings, Block } from '../../shared/types'
 import { BiometricAuth } from '@aparajita/capacitor-biometric-auth'
 import { SecureStorage } from '@aparajita/capacitor-secure-storage'
+import { stripEncryptedForCloud, restoreLocalEncrypted } from '../utils/localOnly'
 
 // ─── Simple IndexedDB wrapper for page storage ──────────────────────────────
 
@@ -128,7 +129,7 @@ export function createCapacitorAdapter(): PlatformAdapter {
       try {
         const plugin = (window as any).Capacitor?.Plugins?.RomaCloudSync
         if (plugin) {
-          await plugin.pushPage({ id: cloudFileId(page.id), json: JSON.stringify(page) })
+          await plugin.pushPage({ id: cloudFileId(page.id), json: JSON.stringify(stripEncryptedForCloud(page)) })
         }
       } catch (e) {
         console.warn('[Roma] iCloud pushPage failed:', page.id, e)
@@ -363,13 +364,14 @@ export function createCapacitorAdapter(): PlatformAdapter {
 
           if (cloudHasContent && !localHasContent) {
             // Cloud has content, local is empty → prefer cloud regardless of timestamp
-            await idbPut(PAGES_STORE, cloudPage)
-            merged.push(cloudPage)
+            const restored = restoreLocalEncrypted(cloudPage, localPage)
+            await idbPut(PAGES_STORE, restored)
+            merged.push(restored)
             console.log('[Roma] syncPull: cloud has content, local empty — restoring:', cloudPage.id)
           } else if (!cloudHasContent && localHasContent) {
             // Local has content, cloud is empty → push local to cloud regardless of timestamp
             try {
-              await plugin.pushPage({ id: cloudFileId(localPage.id), json: JSON.stringify(localPage) })
+              await plugin.pushPage({ id: cloudFileId(localPage.id), json: JSON.stringify(stripEncryptedForCloud(localPage)) })
               console.log('[Roma] syncPull: local has content, cloud empty — pushing real content:', localPage.id)
             } catch (e) {
               console.warn('[Roma] syncPull: push local-content-over-cloud-stub failed:', localPage.id, e)
@@ -380,16 +382,19 @@ export function createCapacitorAdapter(): PlatformAdapter {
             // edited different blocks' content. To avoid ping-pong, we skip the
             // write to whichever side already byte-matches the merge (ignoring
             // only page-level updatedAt, which the merge always bumps).
-            const mergedPage = mergePages(cloudPage, localPage)
+            // Encrypted blocks are device-local: the cloud only has a placeholder,
+            // so put this device's ciphertext back and compare the cloud side in
+            // its stripped form (otherwise every pull would re-push).
+            const mergedPage = restoreLocalEncrypted(mergePages(cloudPage, localPage), localPage)
             const sameAsLocal = pagesEqualIgnoringPageTs(mergedPage, localPage)
-            const sameAsCloud = pagesEqualIgnoringPageTs(mergedPage, cloudPage)
+            const sameAsCloud = pagesEqualIgnoringPageTs(stripEncryptedForCloud(mergedPage), cloudPage)
             if (!sameAsLocal) {
               await idbPut(PAGES_STORE, mergedPage)
               merged.push(mergedPage)
             }
             if (!sameAsCloud) {
               try {
-                await plugin.pushPage({ id: cloudFileId(mergedPage.id), json: JSON.stringify(mergedPage) })
+                await plugin.pushPage({ id: cloudFileId(mergedPage.id), json: JSON.stringify(stripEncryptedForCloud(mergedPage)) })
               } catch (e) {
                 console.warn('[Roma] syncPull: push merged failed:', mergedPage.id, e)
               }
@@ -407,7 +412,7 @@ export function createCapacitorAdapter(): PlatformAdapter {
         for (const localPage of allLocal) {
           if (!cloudIds.has(localPage.id) && hasRealContent(localPage)) {
             try {
-              await plugin.pushPage({ id: cloudFileId(localPage.id), json: JSON.stringify(localPage) })
+              await plugin.pushPage({ id: cloudFileId(localPage.id), json: JSON.stringify(stripEncryptedForCloud(localPage)) })
               pushedCount++
             } catch (e) {
               console.warn('[Roma] syncPull: push local-only failed:', localPage.id, e)

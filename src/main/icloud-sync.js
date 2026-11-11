@@ -19,6 +19,46 @@ function sanitizeFilename(name) {
   return name.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').substring(0, 200)
 }
 
+// ─── Device-local encrypted blocks ───────────────────────────────────────────
+// Encrypted blocks never leave the device: before a page is written to iCloud,
+// each encrypted block keeps its id and position but its ciphertext is replaced
+// by LOCAL_ONLY_MARK. When a cloud copy is merged in, the local ciphertext is put
+// back. MUST stay identical to src/renderer/utils/localOnly.ts.
+const LOCAL_ONLY_MARK = '{{encrypt:local-only}}'
+const ENCRYPT_PATTERN = /\{\{encrypt:[^}]+\}\}/
+
+function hasCiphertext(content) {
+  return !!content && content !== LOCAL_ONLY_MARK && ENCRYPT_PATTERN.test(content)
+}
+
+function stripEncryptedForCloud(page) {
+  const strip = blocks => (blocks || []).map(b => ({
+    ...b,
+    content: hasCiphertext(b.content) ? LOCAL_ONLY_MARK : b.content,
+    children: strip(b.children || []),
+  }))
+  return { ...page, blocks: strip(page.blocks) }
+}
+
+function restoreLocalEncrypted(page, localPage) {
+  if (!localPage) return page
+  const local = new Map()
+  const collect = blocks => {
+    for (const b of blocks || []) {
+      if (hasCiphertext(b.content)) local.set(b.id, b.content)
+      collect(b.children)
+    }
+  }
+  collect(localPage.blocks)
+  if (!local.size) return page
+  const restore = blocks => (blocks || []).map(b => ({
+    ...b,
+    content: b.content === LOCAL_ONLY_MARK && local.has(b.id) ? local.get(b.id) : b.content,
+    children: restore(b.children || []),
+  }))
+  return { ...page, blocks: restore(page.blocks) }
+}
+
 /**
  * @param {{pagesDir: string, icloudContainer: string}} dirs
  */
@@ -43,7 +83,7 @@ function createICloudSync({ pagesDir, icloudContainer }) {
     try {
       if (!fs.existsSync(ICLOUD_CONTAINER)) fs.mkdirSync(ICLOUD_CONTAINER, { recursive: true })
       const filePath = path.join(ICLOUD_CONTAINER, `${sanitizeFilename(page.id)}.json`)
-      fs.writeFileSync(filePath, JSON.stringify(page, null, 2))
+      fs.writeFileSync(filePath, JSON.stringify(stripEncryptedForCloud(page), null, 2))
     } catch (err) {
       console.error('iCloud sync write failed:', err.message)
     }
@@ -194,9 +234,10 @@ function createICloudSync({ pagesDir, icloudContainer }) {
         // come from a device opening a daily note before sync has completed.
         if (cloudHasContent && !localHasContent) {
           // Cloud has data, local is empty → accept cloud regardless of timestamp
-          await fs.promises.writeFile(localPath, JSON.stringify(cloudPage, null, 2))
-          if (isAlias) { syncPageToICloud(cloudPage); retireAlias() }
-          return cloudPage
+          const restored = restoreLocalEncrypted(cloudPage, localPage)
+          await fs.promises.writeFile(localPath, JSON.stringify(restored, null, 2))
+          if (isAlias) { syncPageToICloud(restored); retireAlias() }
+          return restored
         } else if (!cloudHasContent && localHasContent) {
           // Cloud is empty, local has data → push local to cloud regardless of timestamp
           console.log(`iCloud sync: keeping real local content for ${cloudPage.id} (cloud stub discarded)`)
@@ -209,9 +250,14 @@ function createICloudSync({ pagesDir, icloudContainer }) {
           // the same block IDs but edited different blocks' content. To avoid
           // ping-pong, skip the write to whichever side already byte-matches the
           // merge (ignoring only page-level updatedAt, which the merge bumps).
-          const mergedPage = mergePages(cloudPage, localPage)
+          // The cloud only holds placeholders for encrypted blocks: put the local
+          // ciphertext back, and compare against the cloud in stripped form so a
+          // page with encrypted blocks isn't re-pushed on every pull. Cloud files
+          // that still hold ciphertext (written by older builds) differ from the
+          // stripped merge, so they get rewritten without it.
+          const mergedPage = restoreLocalEncrypted(mergePages(cloudPage, localPage), localPage)
           const sameAsLocal = pagesEqualIgnoringPageTs(mergedPage, localPage)
-          const sameAsCloud = pagesEqualIgnoringPageTs(mergedPage, cloudPage)
+          const sameAsCloud = pagesEqualIgnoringPageTs(stripEncryptedForCloud(mergedPage), cloudPage)
           if (!sameAsLocal) {
             await fs.promises.writeFile(localPath, JSON.stringify(mergedPage, null, 2))
           }
@@ -279,4 +325,4 @@ function createICloudSync({ pagesDir, icloudContainer }) {
   }
 }
 
-module.exports = { createICloudSync, sanitizeFilename }
+module.exports = { createICloudSync, sanitizeFilename, stripEncryptedForCloud, restoreLocalEncrypted, LOCAL_ONLY_MARK }

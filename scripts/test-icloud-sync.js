@@ -10,7 +10,7 @@ const os = require('os')
 const path = require('path')
 const assert = require('assert')
 
-const { createICloudSync, sanitizeFilename } = require('../src/main/icloud-sync')
+const { createICloudSync, sanitizeFilename, LOCAL_ONLY_MARK } = require('../src/main/icloud-sync')
 
 let passed = 0
 let failed = 0
@@ -227,6 +227,71 @@ test('nested children survive an alias merge', async () => {
 
   assert.deepStrictEqual(contents(readLocal(id)), ['hijo iphone', 'hijo mac', 'padre'])
   assert.deepStrictEqual(cloudFiles(), [`${sanitizeFilename(id)}.json`])
+})
+
+// ─── Encrypted blocks are device-local ───────────────────────────────────────
+
+const CIPHER = '{{encrypt:v2$c2VjcmV0Y2lwaGVydGV4dA==}}'
+const hasCipherText = (file) => fs.readFileSync(path.join(ICLOUD_DIR, file), 'utf-8').includes('v2$')
+
+test('encrypted: mirroring a page never writes ciphertext to iCloud', async () => {
+  setup()
+  const p = page('secret page', [
+    block('b1', 'visible', '2026-01-02T00:00:00.000Z', [block('e1', CIPHER, '2026-01-02T00:00:00.000Z')]),
+  ], '2026-01-02T00:00:00.000Z')
+  sync.syncPageToICloud(p)
+  const file = `${sanitizeFilename(p.id)}.json`
+  assert.ok(!hasCipherText(file))
+  const cloud = readCloud(file)
+  assert.strictEqual(cloud.blocks[0].content, 'visible')
+  assert.strictEqual(cloud.blocks[0].children[0].id, 'e1')
+  assert.strictEqual(cloud.blocks[0].children[0].content, LOCAL_ONLY_MARK)
+})
+
+test('encrypted: a newer cloud placeholder never overwrites local ciphertext', async () => {
+  setup()
+  const id = 'enc merge'
+  writeLocal(page(id, [block('e1', CIPHER, '2026-01-01T00:00:00.000Z'), block('b1', 'old', '2026-01-01T00:00:00.000Z')], '2026-01-01T00:00:00.000Z'))
+  writeCloud(`${sanitizeFilename(id)}.json`, page(id, [
+    block('e1', LOCAL_ONLY_MARK, '2026-01-05T00:00:00.000Z'),
+    block('b1', 'new from iphone', '2026-01-05T00:00:00.000Z'),
+  ], '2026-01-05T00:00:00.000Z'))
+  await sync.syncCloudFile(`${sanitizeFilename(id)}.json`)
+  const local = readLocal(id)
+  assert.strictEqual(local.blocks.find(b => b.id === 'e1').content, CIPHER)
+  assert.strictEqual(local.blocks.find(b => b.id === 'b1').content, 'new from iphone')
+  assert.ok(!hasCipherText(`${sanitizeFilename(id)}.json`))
+})
+
+test('encrypted: ciphertext left in iCloud by older builds is purged on pull', async () => {
+  setup()
+  const id = 'legacy'
+  const p = page(id, [block('e1', CIPHER, '2026-01-01T00:00:00.000Z')], '2026-01-01T00:00:00.000Z')
+  writeLocal(p)
+  writeCloud(`${sanitizeFilename(id)}.json`, p)
+  await sync.pullFromICloud()
+  assert.ok(!hasCipherText(`${sanitizeFilename(id)}.json`))
+  assert.strictEqual(readLocal(id).blocks[0].content, CIPHER)
+})
+
+test('encrypted: an already-stripped cloud copy is not re-pushed every pull', async () => {
+  setup()
+  const id = 'stable'
+  writeLocal(page(id, [block('e1', CIPHER, '2026-01-01T00:00:00.000Z'), block('b1', 'x', '2026-01-01T00:00:00.000Z')], '2026-01-01T00:00:00.000Z'))
+  await sync.pullFromICloud() // first push (stripped)
+  const file = path.join(ICLOUD_DIR, `${sanitizeFilename(id)}.json`)
+  const before = fs.readFileSync(file, 'utf-8')
+  const changed = await sync.syncCloudFile(`${sanitizeFilename(id)}.json`)
+  assert.strictEqual(changed, null)
+  assert.strictEqual(fs.readFileSync(file, 'utf-8'), before)
+})
+
+test('encrypted: a device without the ciphertext keeps the placeholder', async () => {
+  setup()
+  const id = 'other device'
+  writeCloud(`${sanitizeFilename(id)}.json`, page(id, [block('e1', LOCAL_ONLY_MARK, '2026-01-01T00:00:00.000Z')], '2026-01-01T00:00:00.000Z'))
+  await sync.syncCloudFile(`${sanitizeFilename(id)}.json`)
+  assert.strictEqual(readLocal(id).blocks[0].content, LOCAL_ONLY_MARK)
 })
 
 // ─── Runner ──────────────────────────────────────────────────────────────────

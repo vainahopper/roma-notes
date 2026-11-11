@@ -5,7 +5,8 @@ import { WikilinkAutocomplete } from './WikilinkAutocomplete'
 import { BlockRefAutocomplete } from './BlockRefAutocomplete'
 import { SlashMenu, type SlashCommand } from './SlashMenu'
 import { DatePickerInline } from './DatePickerInline'
-import { isEncryptedBlock, encryptBlock, encryptBlockSync, decryptBlock } from '../utils/encryption'
+import { isEncryptedBlock, encryptBlock, decryptBlock } from '../utils/encryption'
+import { isLocalOnlyPlaceholder } from '../utils/localOnly'
 import { dateToPageTitle, blocksToHtmlList } from '../utils/helpers'
 import { platform } from '../platform'
 import './BlockItem.css'
@@ -105,6 +106,15 @@ export function BlockItem({
   unlockPasswordRef.current = unlockPassword
   contentRef.current = content
 
+  // Every content edit goes through here. While the block is unlocked its
+  // content is plaintext, which must never reach the store (→ disk, iCloud,
+  // cloud). It stays in local state and is saved only in encrypted form by
+  // reEncrypt() on blur / auto-lock / unmount.
+  const emitChange = useCallback((id: string, value: string) => {
+    if (unlockPasswordRef.current !== null) return
+    onChange(id, value)
+  }, [onChange])
+
   // Stable auto-lock helpers — declared early to avoid TDZ when referenced
   // from earlier useCallback dependency arrays (handleContentChange, handleUnlock).
   // reEncrypt is declared later but called via reEncryptRef to break the cycle.
@@ -124,16 +134,26 @@ export function BlockItem({
     }, AUTO_LOCK_MS)
   }, [])
 
+  // Latest onChange, for the async re-encrypt that finishes after unmount.
+  const onChangeRef = useRef(onChange)
+  onChangeRef.current = onChange
+  // Plaintext as it was when the block was unlocked — lets unmount skip a
+  // pointless re-encrypt/save when nothing was edited.
+  const unlockedPlaintextRef = useRef<string | null>(null)
+
   useEffect(() => {
     return () => {
       cancelAutoLock()
       const pw = unlockPasswordRef.current
       const ct = contentRef.current
-      if (pw && ct && !isEncryptedBlock(ct)) {
-        // Sync legacy encrypt for unmount cleanup (async not possible here).
-        // Block will be re-encrypted with v2 (PBKDF2+AES-GCM) on next unlock+blur.
-        const encrypted = encryptBlockSync(ct, pw)
-        onChange(block.id, encrypted)
+      if (pw && ct && !isEncryptedBlock(ct) && ct !== unlockedPlaintextRef.current) {
+        // Unmounted while unlocked with edits (e.g. navigated away). Cleanup can't
+        // await, so the v2 (PBKDF2 + AES-GCM) encryption finishes afterwards and
+        // only then is the ciphertext saved. The plaintext is never saved, and the
+        // weak legacy format is no longer used for this path.
+        encryptBlock(ct, pw)
+          .then(encrypted => onChangeRef.current(block.id, encrypted))
+          .catch(err => console.error('[Roma] re-encrypt on unmount failed:', err))
       }
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -189,7 +209,7 @@ export function BlockItem({
     // Don't propagate plaintext to the store while the block is unlocked —
     // doing so would write it to disk and iCloud on every keystroke.
     // reEncrypt() (on blur/unmount) calls onChange with the encrypted form.
-    if (!isUnlocked) onChange(block.id, val)
+    if (!isUnlocked) emitChange(block.id, val)
     else scheduleAutoLock()
 
     const textBefore = val.slice(0, cursor)
@@ -248,6 +268,9 @@ export function BlockItem({
   // Intercept paste of indented outlines (Roam/Obsidian style) and create nested blocks
   const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     if (!onPasteBlocks) return
+    // Unlocked encrypted block: plain paste only. Splitting into blocks would
+    // write plaintext into the page.
+    if (unlockPasswordRef.current !== null) return
     const text = e.clipboardData.getData('text/plain')
     const lines = text.split('\n').filter(l => l.trim() !== '')
     if (lines.length < 2) return
@@ -318,22 +341,22 @@ export function BlockItem({
         if (before.endsWith(marker) && after.startsWith(marker)) {
           // Markers are outside the selection: **[hello]** → hello
           const newVal = before.slice(0, -marker.length) + selected + after.slice(marker.length)
-          setContent(newVal); onChange(block.id, newVal)
+          setContent(newVal); emitChange(block.id, newVal)
           setTimeout(() => ta.setSelectionRange(selStart - marker.length, selEnd - marker.length), 0)
         } else if (selected.startsWith(marker) && selected.endsWith(marker) && selected.length > marker.length * 2) {
           // Markers are inside the selection: [**hello**] → hello
           const inner = selected.slice(marker.length, -marker.length)
           const newVal = before + inner + after
-          setContent(newVal); onChange(block.id, newVal)
+          setContent(newVal); emitChange(block.id, newVal)
           setTimeout(() => ta.setSelectionRange(selStart, selStart + inner.length), 0)
         } else {
           const newVal = before + marker + selected + marker + after
-          setContent(newVal); onChange(block.id, newVal)
+          setContent(newVal); emitChange(block.id, newVal)
           setTimeout(() => ta.setSelectionRange(selStart + marker.length, selEnd + marker.length), 0)
         }
       } else {
         const newVal = val.slice(0, selStart) + marker + marker + val.slice(selStart)
-        setContent(newVal); onChange(block.id, newVal)
+        setContent(newVal); emitChange(block.id, newVal)
         setTimeout(() => ta.setSelectionRange(selStart + marker.length, selStart + marker.length), 0)
       }
       return
@@ -376,7 +399,7 @@ export function BlockItem({
           const aft = after.slice(1)                  // strip the trailing ]
           const newVal = bef + (isSquare ? '[[' : '((') + selected + doubleClose + aft
           const cursorPos = bef.length + 2 + selected.length  // after [[selected, before ]]
-          setContent(newVal); onChange(block.id, newVal)
+          setContent(newVal); emitChange(block.id, newVal)
           setTimeout(() => {
             ta.setSelectionRange(cursorPos, cursorPos)
             if (isSquare) { setWikilinkQuery(selected); setShowWikilink(true); setShowBlockRef(false); setShowSlash(false) }
@@ -389,7 +412,7 @@ export function BlockItem({
         const newVal = before + e.key + selected + singleClose + after
         const newSelStart = selStart + 1   // keep selection on the text (after opening bracket)
         const newSelEnd = selStart + 1 + selected.length
-        setContent(newVal); onChange(block.id, newVal)
+        setContent(newVal); emitChange(block.id, newVal)
         setTimeout(() => ta.setSelectionRange(newSelStart, newSelEnd), 0)
         return
       }
@@ -408,7 +431,7 @@ export function BlockItem({
           const insert = isSquare ? '[]' : '()'
           const newVal = before + insert + after
           const newCursor = selStart + 1
-          setContent(newVal); onChange(block.id, newVal)
+          setContent(newVal); emitChange(block.id, newVal)
           setTimeout(() => {
             ta.setSelectionRange(newCursor, newCursor)
             if (isSquare) { setWikilinkQuery(''); setShowWikilink(true) }
@@ -421,7 +444,7 @@ export function BlockItem({
         e.preventDefault()
         const newVal = before + e.key + doubleClose + after
         const newCursor = selStart + 1
-        setContent(newVal); onChange(block.id, newVal)
+        setContent(newVal); emitChange(block.id, newVal)
         setTimeout(() => {
           ta.setSelectionRange(newCursor, newCursor)
           if (isSquare) { setWikilinkQuery(''); setShowWikilink(true) }
@@ -445,7 +468,7 @@ export function BlockItem({
           e.preventDefault()
           const newVal = before + e.key + singleClose + after
           const newCursor = selStart + 1
-          setContent(newVal); onChange(block.id, newVal)
+          setContent(newVal); emitChange(block.id, newVal)
           setTimeout(() => ta.setSelectionRange(newCursor, newCursor), 0)
           return
         }
@@ -469,6 +492,13 @@ export function BlockItem({
 
     switch (e.key) {
       case 'Enter':
+        if (!e.shiftKey && unlockPasswordRef.current !== null) {
+          // Unlocked encrypted block: Enter locks it instead of splitting it
+          // (a split would save both halves as plaintext). Shift+Enter = newline.
+          e.preventDefault()
+          reEncryptRef.current?.(ta?.value ?? content, unlockPasswordRef.current)
+          break
+        }
         if (!e.shiftKey) {
           e.preventDefault()
           const pos = ta?.selectionStart ?? content.length
@@ -510,7 +540,7 @@ export function BlockItem({
                 if (idx !== -1) remaining = remaining.slice(0, idx) + remaining.slice(idx + 2)
               }
               const newVal = beforeCur.slice(0, lineStart) + remaining
-              setContent(newVal); onChange(block.id, newVal)
+              setContent(newVal); emitChange(block.id, newVal)
               setShowWikilink(false); setShowBlockRef(false)
               setTimeout(() => ta.setSelectionRange(lineStart, lineStart), 0)
               break
@@ -526,7 +556,7 @@ export function BlockItem({
               const inner = afterCur.slice(0, closingIdx)
               const newVal = beforeCur.slice(0, -2) + inner + afterCur.slice(closingIdx + 2)
               const nc = cursor - 2
-              setContent(newVal); onChange(block.id, newVal); setShowWikilink(false)
+              setContent(newVal); emitChange(block.id, newVal); setShowWikilink(false)
               setTimeout(() => ta.setSelectionRange(nc, nc), 0)
               break
             }
@@ -538,7 +568,7 @@ export function BlockItem({
             e.preventDefault()
             const newVal = beforeCur.slice(0, -1) + afterCur.slice(1)
             const nc = cursor - 1
-            setContent(newVal); onChange(block.id, newVal); setShowWikilink(false)
+            setContent(newVal); emitChange(block.id, newVal); setShowWikilink(false)
             setTimeout(() => ta.setSelectionRange(nc, nc), 0)
             break
           }
@@ -550,7 +580,7 @@ export function BlockItem({
               e.preventDefault()
               const newVal = beforeCur.slice(0, -1) + afterCur.slice(0, closingIdx) + afterCur.slice(closingIdx + 2)
               const nc = cursor - 1
-              setContent(newVal); onChange(block.id, newVal); setShowWikilink(false)
+              setContent(newVal); emitChange(block.id, newVal); setShowWikilink(false)
               setTimeout(() => ta.setSelectionRange(nc, nc), 0)
               break
             }
@@ -564,7 +594,7 @@ export function BlockItem({
               const inner = afterCur.slice(0, closingIdx)
               const newVal = beforeCur.slice(0, -2) + inner + afterCur.slice(closingIdx + 2)
               const nc = cursor - 2
-              setContent(newVal); onChange(block.id, newVal); setShowBlockRef(false)
+              setContent(newVal); emitChange(block.id, newVal); setShowBlockRef(false)
               setTimeout(() => ta.setSelectionRange(nc, nc), 0)
               break
             }
@@ -576,7 +606,7 @@ export function BlockItem({
             e.preventDefault()
             const newVal = beforeCur.slice(0, -1) + afterCur.slice(1)
             const nc = cursor - 1
-            setContent(newVal); onChange(block.id, newVal); setShowBlockRef(false)
+            setContent(newVal); emitChange(block.id, newVal); setShowBlockRef(false)
             setTimeout(() => ta.setSelectionRange(nc, nc), 0)
             break
           }
@@ -588,7 +618,7 @@ export function BlockItem({
               e.preventDefault()
               const newVal = beforeCur.slice(0, -1) + afterCur.slice(0, closingIdx) + afterCur.slice(closingIdx + 2)
               const nc = cursor - 1
-              setContent(newVal); onChange(block.id, newVal); setShowBlockRef(false)
+              setContent(newVal); emitChange(block.id, newVal); setShowBlockRef(false)
               setTimeout(() => ta.setSelectionRange(nc, nc), 0)
               break
             }
@@ -612,6 +642,8 @@ export function BlockItem({
 
       case 'Tab':
         e.preventDefault()
+        // Indenting re-mounts the block, which would race its re-encryption.
+        if (unlockPasswordRef.current !== null) break
         onTab(block.id, e.shiftKey)
         break
 
@@ -644,7 +676,7 @@ export function BlockItem({
     // Strip any auto-inserted "]]" immediately after cursor to avoid quadruple brackets
     const afterCursor = content.slice(cursor).replace(/^\]\]/, '')
     const newContent = newBefore + afterCursor
-    setContent(newContent); onChange(block.id, newContent); setShowWikilink(false)
+    setContent(newContent); emitChange(block.id, newContent); setShowWikilink(false)
     setTimeout(() => { ta?.focus(); ta?.setSelectionRange(newBefore.length, newBefore.length) }, 0)
   }, [block.id, content, onChange])
 
@@ -655,7 +687,7 @@ export function BlockItem({
     // Strip any auto-inserted "]]" immediately after cursor to avoid quadruple brackets
     const afterCursor = content.slice(cursor).replace(/^\]\]/, '')
     const newContent = newBefore + afterCursor
-    setContent(newContent); onChange(block.id, newContent); setShowWikilink(false)
+    setContent(newContent); emitChange(block.id, newContent); setShowWikilink(false)
     setTimeout(() => ta?.focus(), 0)
   }, [block.id, content, onChange])
 
@@ -668,7 +700,7 @@ export function BlockItem({
     const tag = /^[A-Za-z0-9_À-ÿ-]+$/.test(title) ? `#${title}` : `#[[${title}]]`
     const newBefore = content.slice(0, cursor).replace(/#[A-Za-z0-9_À-ÿ-]*$/, tag)
     const newContent = newBefore + content.slice(cursor)
-    setContent(newContent); onChange(block.id, newContent); setShowTag(false)
+    setContent(newContent); emitChange(block.id, newContent); setShowTag(false)
     setTimeout(() => { ta?.focus(); ta?.setSelectionRange(newBefore.length, newBefore.length) }, 0)
   }, [block.id, content, onChange])
 
@@ -683,7 +715,7 @@ export function BlockItem({
     const afterCursor = content.slice(cursor)
     const newAfter = afterCursor.startsWith('))') ? afterCursor.slice(2) : afterCursor
     const newContent = newBefore + newAfter
-    setContent(newContent); onChange(block.id, newContent); setShowBlockRef(false)
+    setContent(newContent); emitChange(block.id, newContent); setShowBlockRef(false)
     setTimeout(() => { ta?.focus(); ta?.setSelectionRange(newBefore.length, newBefore.length) }, 0)
   }, [block.id, content, onChange])
 
@@ -704,40 +736,40 @@ export function BlockItem({
 
   const slashCommands: SlashCommand[] = [
     { id: 'todo', label: 'To-do', description: 'Toggle todo checkbox (⌘↵)', icon: '☐',
-      action: () => applySlashCommand((base) => { setContent(base); onChange(block.id, base); onToggleTodo(block.id) }) },
+      action: () => applySlashCommand((base) => { setContent(base); emitChange(block.id, base); onToggleTodo(block.id) }) },
     { id: 'page', label: 'Page link', description: 'Link to a page [[…]]', icon: '📄',
       action: () => applySlashCommand((base, cur) => {
         const ta = textareaRef.current
         const nv = base.slice(0, cur) + '[[]]' + base.slice(cur)
-        setContent(nv); onChange(block.id, nv)
+        setContent(nv); emitChange(block.id, nv)
         setTimeout(() => { ta?.setSelectionRange(cur+2, cur+2); setWikilinkQuery(''); setShowWikilink(true) }, 0)
       }) },
     { id: 'blockref', label: 'Block reference', description: 'Reference a block ((…))', icon: '🔗',
       action: () => applySlashCommand((base, cur) => {
         const ta = textareaRef.current
         const nv = base.slice(0, cur) + '(())' + base.slice(cur)
-        setContent(nv); onChange(block.id, nv)
+        setContent(nv); emitChange(block.id, nv)
         setTimeout(() => { ta?.setSelectionRange(cur+2, cur+2); setBlockRefQuery(''); setShowBlockRef(true) }, 0)
       }) },
     { id: 'bold', label: 'Bold', description: '**bold**', icon: 'B',
-      action: () => applySlashCommand((base, cur) => { const ta=textareaRef.current; const nv=base.slice(0,cur)+'****'+base.slice(cur); setContent(nv); onChange(block.id,nv); setTimeout(()=>ta?.setSelectionRange(cur+2,cur+2),0) }) },
+      action: () => applySlashCommand((base, cur) => { const ta=textareaRef.current; const nv=base.slice(0,cur)+'****'+base.slice(cur); setContent(nv); emitChange(block.id,nv); setTimeout(()=>ta?.setSelectionRange(cur+2,cur+2),0) }) },
     { id: 'italic', label: 'Italic', description: '__italic__', icon: 'I',
-      action: () => applySlashCommand((base, cur) => { const ta=textareaRef.current; const nv=base.slice(0,cur)+'____'+base.slice(cur); setContent(nv); onChange(block.id,nv); setTimeout(()=>ta?.setSelectionRange(cur+2,cur+2),0) }) },
+      action: () => applySlashCommand((base, cur) => { const ta=textareaRef.current; const nv=base.slice(0,cur)+'____'+base.slice(cur); setContent(nv); emitChange(block.id,nv); setTimeout(()=>ta?.setSelectionRange(cur+2,cur+2),0) }) },
     { id: 'highlight', label: 'Highlight', description: '^^highlight^^', icon: '✏️',
-      action: () => applySlashCommand((base, cur) => { const ta=textareaRef.current; const nv=base.slice(0,cur)+'^^^^'+base.slice(cur); setContent(nv); onChange(block.id,nv); setTimeout(()=>ta?.setSelectionRange(cur+2,cur+2),0) }) },
+      action: () => applySlashCommand((base, cur) => { const ta=textareaRef.current; const nv=base.slice(0,cur)+'^^^^'+base.slice(cur); setContent(nv); emitChange(block.id,nv); setTimeout(()=>ta?.setSelectionRange(cur+2,cur+2),0) }) },
     { id: 'code', label: 'Inline code', description: '`code`', icon: '</>',
-      action: () => applySlashCommand((base, cur) => { const ta=textareaRef.current; const nv=base.slice(0,cur)+'``'+base.slice(cur); setContent(nv); onChange(block.id,nv); setTimeout(()=>ta?.setSelectionRange(cur+1,cur+1),0) }) },
+      action: () => applySlashCommand((base, cur) => { const ta=textareaRef.current; const nv=base.slice(0,cur)+'``'+base.slice(cur); setContent(nv); emitChange(block.id,nv); setTimeout(()=>ta?.setSelectionRange(cur+1,cur+1),0) }) },
     { id: 'encrypt', label: 'Encrypt block', description: 'Encrypt with AES (⌘E)', icon: '🔒',
-      action: () => applySlashCommand((base) => { setContent(base); onChange(block.id, base); setEncryptModal(true) }) },
+      action: () => applySlashCommand((base) => { setContent(base); emitChange(block.id, base); setEncryptModal(true) }) },
     { id: 'date', label: 'Date', description: 'Insert a date as [[link]]', icon: '📅',
-      action: () => applySlashCommand((base) => { setContent(base); onChange(block.id, base); setShowDatePicker(true) }) },
+      action: () => applySlashCommand((base) => { setContent(base); emitChange(block.id, base); setShowDatePicker(true) }) },
     { id: 'yesterday', label: 'Yesterday', description: 'Link to yesterday\'s note', icon: '←',
       action: () => applySlashCommand((base, cur) => {
         const ta = textareaRef.current
         const d = new Date(); d.setDate(d.getDate() - 1)
         const link = `[[${dateToPageTitle(d)}]]`
         const newContent = base.slice(0, cur) + link + base.slice(cur)
-        setContent(newContent); onChange(block.id, newContent); closeAllMenus()
+        setContent(newContent); emitChange(block.id, newContent); closeAllMenus()
         setTimeout(() => { ta?.setSelectionRange(cur + link.length, cur + link.length); ta?.focus() }, 0)
       }) },
     { id: 'tomorrow', label: 'Tomorrow', description: 'Link to tomorrow\'s note', icon: '→',
@@ -746,21 +778,21 @@ export function BlockItem({
         const d = new Date(); d.setDate(d.getDate() + 1)
         const link = `[[${dateToPageTitle(d)}]]`
         const newContent = base.slice(0, cur) + link + base.slice(cur)
-        setContent(newContent); onChange(block.id, newContent); closeAllMenus()
+        setContent(newContent); emitChange(block.id, newContent); closeAllMenus()
         setTimeout(() => { ta?.setSelectionRange(cur + link.length, cur + link.length); ta?.focus() }, 0)
       }) },
     { id: 'h1', label: 'Heading 1', description: '# Large heading', icon: 'H1',
-      action: () => applySlashCommand((base) => { const ta=textareaRef.current; const nc='# '+base.replace(/^#+\s*/,''); setContent(nc); onChange(block.id,nc); setTimeout(()=>{ ta?.focus(); ta?.setSelectionRange(nc.length,nc.length) },0) }) },
+      action: () => applySlashCommand((base) => { const ta=textareaRef.current; const nc='# '+base.replace(/^#+\s*/,''); setContent(nc); emitChange(block.id,nc); setTimeout(()=>{ ta?.focus(); ta?.setSelectionRange(nc.length,nc.length) },0) }) },
     { id: 'h2', label: 'Heading 2', description: '## Medium heading', icon: 'H2',
-      action: () => applySlashCommand((base) => { const ta=textareaRef.current; const nc='## '+base.replace(/^#+\s*/,''); setContent(nc); onChange(block.id,nc); setTimeout(()=>{ ta?.focus(); ta?.setSelectionRange(nc.length,nc.length) },0) }) },
+      action: () => applySlashCommand((base) => { const ta=textareaRef.current; const nc='## '+base.replace(/^#+\s*/,''); setContent(nc); emitChange(block.id,nc); setTimeout(()=>{ ta?.focus(); ta?.setSelectionRange(nc.length,nc.length) },0) }) },
     { id: 'h3', label: 'Heading 3', description: '### Small heading', icon: 'H3',
-      action: () => applySlashCommand((base) => { const ta=textareaRef.current; const nc='### '+base.replace(/^#+\s*/,''); setContent(nc); onChange(block.id,nc); setTimeout(()=>{ ta?.focus(); ta?.setSelectionRange(nc.length,nc.length) },0) }) },
+      action: () => applySlashCommand((base) => { const ta=textareaRef.current; const nc='### '+base.replace(/^#+\s*/,''); setContent(nc); emitChange(block.id,nc); setTimeout(()=>{ ta?.focus(); ta?.setSelectionRange(nc.length,nc.length) },0) }) },
     { id: 'slider', label: 'Slider', description: 'Insert a 0–10 slider', icon: '▬',
       action: () => applySlashCommand((base, cur) => {
         const ta = textareaRef.current
         const token = '{{slider:5}}'
         const nv = base.slice(0, cur) + token + base.slice(cur)
-        setContent(nv); onChange(block.id, nv)
+        setContent(nv); emitChange(block.id, nv)
         setTimeout(() => { ta?.setSelectionRange(cur + token.length, cur + token.length); ta?.focus() }, 0)
       }) },
   ]
@@ -796,7 +828,7 @@ export function BlockItem({
           const templateName = b.content.trim()
           const newContent = (prefix ? prefix + ' ' : '') + templateName + textAfter.trimStart()
           setContent(newContent)
-          onChange(block.id, newContent)
+          emitChange(block.id, newContent)
           closeAllMenus()
           // Clone template blocks with fresh IDs and insert as children
           if (onInsertTemplateBlocks) {
@@ -819,6 +851,7 @@ export function BlockItem({
 
   // Called by EncryptedBlockView when user successfully decrypts
   const handleUnlock = useCallback((plaintext: string, password: string) => {
+    unlockedPlaintextRef.current = plaintext
     setUnlockPassword(password)
     setContent(plaintext)
     pendingCursorPos.current = plaintext.length  // cursor at end
@@ -854,7 +887,7 @@ export function BlockItem({
     const ta = textareaRef.current
     const cursor = ta?.selectionStart ?? content.length
     const newContent = content.slice(0, cursor) + `[[${dateTitle}]]` + content.slice(cursor)
-    setContent(newContent); onChange(block.id, newContent)
+    setContent(newContent); emitChange(block.id, newContent)
     setShowDatePicker(false)
     setTimeout(() => { ta?.focus(); ta?.setSelectionRange(cursor + dateTitle.length + 4, cursor + dateTitle.length + 4) }, 0)
   }
@@ -1049,7 +1082,7 @@ export function BlockItem({
                     onNavigate={onNavigate}
                     onOpenSidebar={onOpenSidebar}
                     onNavigateToBlock={onNavigateToBlock}
-                    onSliderChange={(newContent) => { setContent(newContent); onChange(block.id, newContent) }}
+                    onSliderChange={(newContent) => { setContent(newContent); emitChange(block.id, newContent) }}
                   />
               }
             </div>
@@ -1180,6 +1213,17 @@ function EncryptedBlockView({ blockId, content, onUnlock }: {
       setError(true)
     }
   }, [blockId, content, password, onUnlock])
+
+  // Encrypted blocks are device-local: this device only has the placeholder,
+  // the ciphertext lives on the device where the block was encrypted.
+  if (isLocalOnlyPlaceholder(content)) {
+    return (
+      <span className="encrypted-block" title="Encrypted blocks never leave the device they were created on">
+        <span className="encrypted-icon">🔒</span>
+        <span className="encrypted-label">Encrypted block — only on your other device</span>
+      </span>
+    )
+  }
 
   if (mode === 'touchid') {
     return (

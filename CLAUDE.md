@@ -82,7 +82,7 @@ manually via **Roma Notes > Check for Updates…**.
 `npm run deploy:ios` copies `dist/` to the iCloud container. The iPhone app
 detects the new version 5 seconds after launch and applies it (reloads).
 
-## Current version: 1.8.23
+## Current version: 1.8.24
 
 ## iPhone setup (one-time)
 1. In Xcode: select your Apple Developer Team (Signing & Capabilities)
@@ -116,6 +116,7 @@ detects the new version 5 seconds after launch and applies it (reloads).
 - iPhone reads/writes the same iCloud container via `RomaCloudSyncPlugin`
 - Both sides pull on startup, every 60s, and on app focus/resume
 - Conflict resolution: latest `updatedAt` timestamp wins
+- **Encrypted blocks are device-local**: before any upload (iCloud on Mac/iPhone, Netlify bridge) their ciphertext is replaced by `{{encrypt:local-only}}` (`utils/localOnly.ts`, mirrored in `src/main/icloud-sync.js` and `notes.mts`); on pull the device holding the ciphertext restores it. Other devices show "only on your other device". Unlocked plaintext never reaches the store (`emitChange` in `BlockItem.tsx`)
 
 ## Cloud bridge (agent access — Instinct)
 - `cloud/` = Netlify site `roma-research-14a959` (function `notes.mts` + Netlify Blobs). Deploy: `cd cloud && netlify deploy --prod --no-build --dir public --functions netlify/functions`

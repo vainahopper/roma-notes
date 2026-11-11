@@ -2,6 +2,8 @@ import type { Page, Block } from '../../shared/types'
 import type { CloudOp } from './cloudBridge'
 import { generateId } from './helpers'
 
+const ENCRYPT_PATTERN = /\{\{encrypt:[^}]+\}\}/
+
 /**
  * Apply the agent's block edits/deletes/moves (see cloud/netlify/functions/notes.mts)
  * to local pages. Pure: returns new copies of the pages that changed.
@@ -32,6 +34,10 @@ export function replayCloudOps(ops: CloudOp[], lookup: (id: string) => Page | un
       const page = working(op.pageId)
       const hit = page && find(page.blocks, op.blockId)
       if (!hit) continue // block already gone or never synced here
+      // The server refuses these too, but the ciphertext only lives on this
+      // device: never let an agent op overwrite or drop an encrypted block.
+      const touchesEncrypted = (b: Block): boolean => ENCRYPT_PATTERN.test(b.content) || b.children.some(touchesEncrypted)
+      if (op.type === 'edit' ? ENCRYPT_PATTERN.test(hit.list[hit.index].content) : touchesEncrypted(hit.list[hit.index])) continue
       if (op.type === 'delete') hit.list.splice(hit.index, 1)
       else hit.list[hit.index] = { ...hit.list[hit.index], content: op.content ?? hit.list[hit.index].content, updatedAt: now }
       changed.add(op.pageId)

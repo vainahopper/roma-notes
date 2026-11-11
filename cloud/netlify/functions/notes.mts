@@ -70,6 +70,18 @@ interface TrashItem {
 
 const TZ = 'Europe/Madrid'
 const ENCRYPT_PATTERN = /\{\{encrypt:[^}]+\}\}/
+// Encrypted blocks are device-local. The apps upload only this placeholder, and
+// the server strips any real ciphertext an older build still sends, so it is
+// never stored here. MUST match LOCAL_ONLY_MARK in src/renderer/utils/localOnly.ts.
+const LOCAL_ONLY_MARK = '{{encrypt:local-only}}'
+
+function stripCiphertext(blocks: Block[]): Block[] {
+  return (blocks || []).map(b => ({
+    ...b,
+    content: ENCRYPT_PATTERN.test(b.content) ? LOCAL_ONLY_MARK : b.content,
+    children: stripCiphertext(b.children || []),
+  }))
+}
 
 const store = () => getStore({ name: 'roma', consistency: 'strong' })
 
@@ -208,7 +220,8 @@ function hasRealContent(blocks: Block[]): boolean {
 async function savePages(incoming: Page[], { fromApp = false } = {}): Promise<void> {
   const s = store()
   const pages: Page[] = []
-  for (const p of incoming) {
+  for (const raw of incoming) {
+    const p = { ...raw, blocks: stripCiphertext(raw.blocks) }
     // A device that saves a not-yet-synced empty daily note must not wipe the
     // real one (same content-wins rule as iCloud sync). Only for app uploads of
     // dailies: emptying a topic page — or an agent delete — is intentional.

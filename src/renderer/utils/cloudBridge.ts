@@ -1,4 +1,5 @@
 import type { Page, Block } from '../../shared/types'
+import { stripEncryptedForCloud, pageHasCiphertext } from './localOnly'
 
 // Cloud bridge: mirrors pages to the Netlify API in cloud/ so an agent (Instinct)
 // can read them without the Mac being on, and pulls the agent's writes from its
@@ -7,6 +8,7 @@ import type { Page, Block } from '../../shared/types'
 const BASE: string | undefined = import.meta.env.VITE_ROMA_CLOUD_URL
 const MAX_BATCH_BYTES = 4_000_000 // Netlify functions reject bodies over 6MB
 const PUSH_DEBOUNCE_MS = 5000
+const PURGE_KEY = 'roma.cloudEncryptedPurged.v1'
 
 export interface InboxItem {
   id: string
@@ -52,7 +54,9 @@ async function post(path: string, body: unknown): Promise<void> {
 async function pushPages(pages: Page[]): Promise<void> {
   let batch: Page[] = []
   let size = 0
-  for (const page of pages) {
+  for (const original of pages) {
+    // Encrypted blocks are device-local: only a placeholder ever leaves the device.
+    const page = stripEncryptedForCloud(original)
     const bytes = JSON.stringify(page).length
     if (batch.length && size + bytes > MAX_BATCH_BYTES) {
       await post('pages', batch)
@@ -102,12 +106,19 @@ export async function cloudCatchUp(pages: Page[]): Promise<number> {
   const res = await fetch(`${BASE}/sync/index`)
   if (!res.ok) throw new Error(`cloud index: ${res.status}`)
   const remote = new Map((await res.json() as { id: string; updatedAt: string }[]).map(e => [e.id, e.updatedAt]))
+  // One-time purge: builds before encrypted blocks became device-local uploaded
+  // their ciphertext. Re-push every page that has some so the server copy is
+  // overwritten with the placeholder version.
+  let purge = false
+  try { purge = !localStorage.getItem(PURGE_KEY) } catch {}
   const stale = pages.filter(p => {
     if (p.updatedAt.startsWith('1970')) return false // in-memory placeholder, never persisted
+    if (purge && pageHasCiphertext(p)) return true
     const r = remote.get(p.id)
     return !r || p.updatedAt > r
   })
   if (stale.length) await pushPages(stale)
+  if (purge) { try { localStorage.setItem(PURGE_KEY, new Date().toISOString()) } catch {} }
   return stale.length
 }
 
