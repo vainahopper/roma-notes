@@ -66,4 +66,6 @@ contextBridge.exposeInMainWorld('api', {
   hasKey: (blockId) => ipcRenderer.invoke('auth:hasKey', blockId),
   getKey: (blockId) => ipcRenderer.invoke('auth:getKey', blockId),
   deleteKey: (blockId) => ipcRenderer.invoke('auth:deleteKey', blockId),
+  hasAnyKey: () => ipcRenderer.invoke('auth:hasAnyKey'),
+  getAllKeys: () => ipcRenderer.invoke('auth:getAllKeys'),
 })

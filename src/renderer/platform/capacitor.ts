@@ -250,6 +250,31 @@ export function createCapacitorAdapter(): PlatformAdapter {
       }
     },
 
+    // Block passwords are stored per block, but most blocks share a password:
+    // these let Face ID unlock a block this device has never unlocked before,
+    // as long as its password is already known from another block.
+    hasAnyKey: async () => {
+      try {
+        return (await SecureStorage.keys()).some(k => k.startsWith(KEY_PREFIX))
+      } catch {
+        return false
+      }
+    },
+
+    getAllKeys: async () => {
+      const out = new Set<string>()
+      try {
+        for (const k of await SecureStorage.keys()) {
+          if (!k.startsWith(KEY_PREFIX)) continue
+          const val = await SecureStorage.get(k, false)
+          if (typeof val === 'string' && val) out.add(val)
+        }
+      } catch (e) {
+        console.error('[Roma] getAllKeys failed', e)
+      }
+      return [...out]
+    },
+
     // ─── iCloud sync (via native plugin) ──────────────────────────────────
     syncPull: async () => {
       try {

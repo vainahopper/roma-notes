@@ -1155,13 +1155,16 @@ function EncryptedBlockView({ blockId, content, onUnlock }: {
   // Check biometric availability AND whether a stored key exists for this block
   useEffect(() => {
     let cancelled = false
+    // A key for this block, or any block password known on this device (most
+    // blocks share one), is enough to offer biometric unlock.
     Promise.all([
       platform.canBiometric(),
       platform.hasKey(blockId),
-    ]).then(([bioAvail, keyExists]) => {
+      platform.hasAnyKey(),
+    ]).then(([bioAvail, keyExists, anyKey]) => {
       if (!cancelled) {
         setTouchIdAvailable(bioAvail)
-        setHasStoredKey(keyExists)
+        setHasStoredKey(keyExists || anyKey)
       }
     }).catch(() => {})
     return () => { cancelled = true }
@@ -1178,7 +1181,18 @@ function EncryptedBlockView({ blockId, content, onUnlock }: {
           const plaintext = await decryptBlock(content, key)
           if (plaintext !== null) { onUnlock(plaintext, key); return }
         }
-        // Key not found or decrypt failed → fall to password
+        // No key for this block yet: try the other passwords this device knows,
+        // and remember the one that works for this block.
+        for (const pw of await platform.getAllKeys()) {
+          if (pw === key) continue
+          const plaintext = await decryptBlock(content, pw)
+          if (plaintext !== null) {
+            try { await platform.saveKey(blockId, pw) } catch {}
+            onUnlock(plaintext, pw)
+            return
+          }
+        }
+        // No known password opens it → fall to password
         setHasStoredKey(false)
         setMode('password')
       } else {

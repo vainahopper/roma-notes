@@ -854,3 +854,20 @@ ipcMain.handle('auth:deleteKey', (_, blockId) => {
   saveKeys(keys)
   return true
 })
+
+// Block passwords are stored per block, but most blocks share a password.
+// These let Touch ID unlock a block this device has never unlocked before,
+// as long as its password is already known from another block.
+const usableKeyEntry = (e) => typeof e === 'string' || (e && e.v === 2)
+
+ipcMain.handle('auth:hasAnyKey', () => Object.values(loadKeys()).some(usableKeyEntry))
+
+ipcMain.handle('auth:getAllKeys', () => {
+  if (!safeStorage.isEncryptionAvailable()) return []
+  const out = new Set()
+  for (const e of Object.values(loadKeys())) {
+    if (!usableKeyEntry(e)) continue
+    try { out.add(safeStorage.decryptString(Buffer.from(typeof e === 'string' ? e : e.data, 'hex'))) } catch {}
+  }
+  return [...out]
+})
